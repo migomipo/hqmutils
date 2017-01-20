@@ -1,0 +1,12 @@
+[Unit]
+Description=Hockey? server (%i)
+
+[Service]
+Environment=WINEPREFIX=/srv/hockeyquestionmark/.wine32
+Environment=WINEARCH=win32
+WorkingDirectory=/srv/hockeyquestionmark/%i
+User=hockeyquestionmark
+ExecStart=/usr/bin/wine /srv/hockeyquestionmark/hockeydedicated.exe
+
+[Install]
+WantedBy=multi-user.target
