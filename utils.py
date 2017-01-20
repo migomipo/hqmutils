@@ -64,6 +64,8 @@ def get_server_info(sock, addresses):
             print(format.format(addr[0], addr[1], version, ping, players, teamsize, name))    
             
             del start_data[addr]
+    for addr in start_data:
+        print("{:<17}{:<7}TIMED OUT".format(addr[0], addr[1]))
             
           
             
