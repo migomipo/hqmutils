@@ -19,13 +19,28 @@ def get_millis_truncated():
 def server_info(args):
     if len(args)<2:
         print("Usage: info <ip> <port>");
+        print("You can request multiple ports at once by separating port numbers with , (no spaces)");
+        print("You can request an entire port range by writing <port>-<port>");
         return
     ip = args[0]
-    port = int(args[1])
-    dest = (ip, port)
+    dests = []  
+    try:
+        port_ranges = args[1].split(",")
+        for port_range in port_ranges:
+            partition = port_range.partition("-")
+            start = int(partition[0])
+            if partition[1]!="":
+                end = int(partition[2])
+                for port in range(start, end+1):
+                    dests.append((ip, port))
+            else:
+                dests.append((ip, start))
+    except ValueError:
+        print("Incorrect arguments")
+        return
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(3)
-    get_server_info(sock, [dest])
+    get_server_info(sock, dests)
     
 def all_servers(args):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -44,8 +59,8 @@ def get_server_info(sock, addresses):
         start_data[address] = {"millis": millis}
         message = hqm.make_info_request_cmessage(55, millis)
         sock.sendto(message, address)
-    format = "{:<17}{:<7}{:<8}{:<8}{:<8}{:<8}{}"
-    print(format.format("ADDRESS", "PORT", "VERSION", "PING", "PLAYERS", "TEAM", "NAME"))
+    format = "{:<17}{:<8}{:<8}{:<8}{:<8}{:<8}{}"
+    print(format.format("ADDRESS", "PORT", "PING", "VERSION", "PLAYERS", "TEAM", "NAME"))
     while len(start_data) > 0:
         try:
             data, addr = sock.recvfrom(1024)
@@ -61,11 +76,11 @@ def get_server_info(sock, addresses):
             name = msg["name"]
             if ping < 0:
                 ping += 0xffffffff
-            print(format.format(addr[0], addr[1], version, ping, players, teamsize, name))    
+            print(format.format(addr[0], addr[1], ping, version, players, teamsize, name))    
             
             del start_data[addr]
     for addr in start_data:
-        print("{:<17}{:<7}TIMED OUT".format(addr[0], addr[1]))
+        print("{:<17}{:<8}TIMED OUT".format(addr[0], addr[1]))
             
           
             
