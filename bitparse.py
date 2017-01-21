@@ -1,24 +1,28 @@
 import struct
-import numpy
+
 from calc3d import Vector3D
 
-vChoice1 = [5,5,5,5,4,1,3,2]
-vChoice2 = [3,4,2,1,3,4,2,1]
-vChoice3 = [4,1,3,2,0,0,0,0]
-
-unitVectors = [
-    numpy.array(( 0, -1,  0)),
-    numpy.array((-1,  0,  0)),
-    numpy.array(( 0,  0, -1)),
-    numpy.array(( 1,  0,  0)),
-    numpy.array(( 0,  0,  1)),
-    numpy.array(( 0,  1,  0))
-]
-
 def normal(v):
+    import numpy
+
     return (1/numpy.sqrt(numpy.dot(v,v)))*v
 
 def calc_rot_vector(len, rot):
+    import numpy
+    
+    vChoice1 = [5,5,5,5,4,1,3,2]
+    vChoice2 = [3,4,2,1,3,4,2,1]
+    vChoice3 = [4,1,3,2,0,0,0,0]    
+    
+    unitVectors = [
+        numpy.array(( 0, -1,  0)),
+        numpy.array((-1,  0,  0)),
+        numpy.array(( 0,  0, -1)),
+        numpy.array(( 1,  0,  0)),
+        numpy.array(( 0,  0,  1)),
+        numpy.array(( 0,  1,  0))
+    ]
+
     rot = numpy.array((rot[0],rot[1],rot[2]))
     result = 0
     if rot[0]<0:
