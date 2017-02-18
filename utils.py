@@ -10,46 +10,106 @@ master = (master_addr, master_port)
 def print_help(args=None):
     print("MigoMipo HQM Utils © John Eriksson 2017")
     print("Commands:")
-    print("\tinfo <ip> <addr> : Shows info about a specific server")
-    print("\tall              : Shows info about all servers")
+    print("  info <ip> <port> : Shows info about a specific server")
+    print("  info public      : Shows info about all public servers")
+    print("  state <ip> <port>: Joins a server and prints information")
+
     
 def get_millis_truncated():
     return int(round(time.time() * 1000)) & 0xffffffff
     
-def server_info(args):
+def state(args):
     if len(args)<2:
-        print("Usage: info <ip> <port>");
+        print("Usage: state <ip> <port>");
+        return  
+    ip = args[0]
+    port = int(args[1])
+    addr = (ip, port)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setblocking(False)
+        session = hqm.HQMClientSession("MigoMibot",55)
+        while True:
+            send = session.get_message()
+            #print("Sending " + str(send))
+            sock.sendto(session.get_message(), addr)
+            time.sleep(0.1)
+            while True:
+                try:
+                    data = sock.recv(8192)
+                except:
+                    break
+                #print("Receiving " + str(data))
+                session.parse_message(data)
+                        
+            if session.last_message_num == 0:
+                
+                break
+        gamestate = session.gamestate
+        print("Score:  {} - {}".format(gamestate.redscore, gamestate.bluescore))  
+        time_left = gamestate.time
+        minutes = time_left//6000
+        seconds = (time_left - (minutes*6000)) // 100
+        print("Time:   {}:{:0>2}".format(minutes, seconds))  
+        period = gamestate.period
+        if period == 0:
+            period = "Warmup"
+        print("Period: {}".format(period))  
+        print("Players:")
+        format = "{:<4}{:<30}{:<8}{:<5}{:<5}"
+        print(format.format("I", "NAME", "TEAM", "G", "A"))
+        for player in gamestate.players.values():
+            if player["team"] == -1:
+                team = "SPEC"
+            elif player["team"] == 0:
+                team = "RED"
+            elif player["team"] == 1:
+                team = "BLUE"
+            index = str(player["index"])
+            if player["index"] == gamestate.you:
+                index += "*"
+            print(format.format(index, player["name"], team, player["goal"], player["assist"]))            
+        sock.sendto(session.get_exit_message(), addr)
+    
+def server_info(args):
+    if len(args)>0 and args[0] == "public":
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(3)
+            sock.sendto(hqm.server_list_message, master)
+            data, addr = sock.recvfrom(1024)
+            addresses = hqm.parse_server_list(data)
+            if "-a" in args:
+                format = "{:<17}{:<8}"
+                print(format.format("ADDRESS", "PORT"))
+                for addr in addresses:
+                    print(format.format(addr[0], addr[1]))  
+            else:
+                get_server_info(sock, addresses)        
+    elif len(args)>=2:
+        ip = args[0]
+        dests = []  
+        try:
+            port_ranges = args[1].split(",")
+            for port_range in port_ranges:
+                partition = port_range.partition("-")
+                start = int(partition[0])
+                if partition[1]!="":
+                    end = int(partition[2])
+                    for port in range(start, end+1):
+                        dests.append((ip, port))
+                else:
+                    dests.append((ip, start))
+        except ValueError:
+            print("Incorrect arguments")
+            return
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(3)
+            get_server_info(sock, dests)        
+    else:
+        print("Usage: info <ip> <port> or");
+        print("       info public");
         print("You can request multiple ports at once by separating port numbers with , (no spaces)");
         print("You can request an entire port range by writing <port>-<port>");
-        return
-    ip = args[0]
-    dests = []  
-    try:
-        port_ranges = args[1].split(",")
-        for port_range in port_ranges:
-            partition = port_range.partition("-")
-            start = int(partition[0])
-            if partition[1]!="":
-                end = int(partition[2])
-                for port in range(start, end+1):
-                    dests.append((ip, port))
-            else:
-                dests.append((ip, start))
-    except ValueError:
-        print("Incorrect arguments")
-        return
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(3)
-    get_server_info(sock, dests)
-    
-def all_servers(args):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(3)
-    sock.sendto(hqm.server_list_message, master)
-    data, addr = sock.recvfrom(1024)
-    addresses = hqm.parse_server_list(data)
-    get_server_info(sock, addresses)
-    
+        
     
 def get_server_info(sock, addresses):
 
@@ -90,7 +150,7 @@ def get_server_info(sock, addresses):
 commands = {
     "help": print_help,
     "info": server_info,
-    "all": all_servers
+    "state": state
 }
 
 if __name__ == "__main__":
