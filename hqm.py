@@ -318,8 +318,10 @@ class HQMClientSession:
                 player_obj["name"] = msg["name"]
                 player_obj["obj"] = msg["offset"]
                 player_obj["index"] = msg["player"]
-                player_obj["goal"] = 0
-                player_obj["assist"] = 0
+                if "goal" not in player_obj:
+                    player_obj["goal"] = 0
+                if "assist" not in player_obj:
+                    player_obj["assist"] = 0
                 self.gamestate.players[msg["player"]] = player_obj
             elif msg["type"] == "EXIT":
                 del self.gamestate.players[msg["player"]]
