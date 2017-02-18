@@ -9,7 +9,6 @@ from twisted.internet import reactor
 from twisted.internet import task
 from bitparse import CSBitReader
 from bitparse import CSBitWriter
-from bitparse import calc_rot_vector
 from calc3d import *    
 import math
 
@@ -17,7 +16,66 @@ master_addr = "216.55.186.104"
 master_port = 27590
 master_server = (master_addr, master_port)
 
+def calc_rot_vector(len, rot):
+    
+    vChoice1 = [5,5,5,5,4,1,3,2]
+    vChoice2 = [3,4,2,1,3,4,2,1]
+    vChoice3 = [4,1,3,2,0,0,0,0]    
+    
+    unitVectors = [
+        Vector3D( 0, -1,  0),
+        Vector3D(-1,  0,  0),
+        Vector3D( 0,  0, -1),
+        Vector3D( 1,  0,  0),
+        Vector3D( 0,  0,  1),
+        Vector3D( 0,  1,  0)
+    ]
 
+    
+    result = 0
+    if rot[0]<0:
+        result |= 1
+    if rot[2]<0:
+        result |= 2
+    if rot[1]<0:
+        result |= 4
+    a1 = unitVectors[vChoice1[result]]
+    a2 = unitVectors[vChoice2[result]]
+    a3 = unitVectors[vChoice3[result]]    
+    for i in range(3, len, 2):
+        temp1 = (a1+a2).normal()
+        temp2 = (a2+a3).normal()
+        temp3 = (a3+a1).normal()
+        
+        b1 = rot-temp3
+        b2 = temp1-temp3
+        b3 = b2.cross(b1)
+        
+        if rot.dot(b3)<0:
+            b1 = rot - temp1
+            b2 = temp2-temp1
+            b3 = b2.cross(b1)
+            if rot.dot(b3)<0:
+                b1 = rot - temp2
+                b2 = temp3-temp2
+                b3 = b2.cross(b1)
+                if rot.dot(b3)<0:
+                    result |= 3<<i
+                    a1 = temp1
+                    a2 = temp2
+                    a3 = temp3
+                else:
+                    result |= 2<<i
+                    a1 = temp3
+                    a2 = temp2                        
+            else:
+                result |= 1<<i
+                a1 = temp1
+                a3 = temp2
+        else:
+            a2 = temp1
+            a3 = temp3
+    return result
         
         
 class HQMServerStatus(Enum):
