@@ -17,7 +17,17 @@ def print_help(args=None):
     
 def get_millis_truncated():
     return int(round(time.time() * 1000)) & 0xffffffff
-    
+  
+
+def int_to_team(n):  
+    if n == -1:
+        team = "-"
+    elif n == 0:
+        team = "RED"
+    elif n == 1:
+        team = "BLUE"
+    return team
+
 def state(args):
     if len(args)<2:
         print("Usage: state <ip> <port>");
@@ -25,6 +35,9 @@ def state(args):
     ip = args[0]
     port = int(args[1])
     addr = (ip, port)
+
+    show_log = "-l" in args
+
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setblocking(False)
         session = hqm.HQMClientSession("MigoMibot",55)
@@ -32,43 +45,91 @@ def state(args):
             send = session.get_message()
             #print("Sending " + str(send))
             sock.sendto(session.get_message(), addr)
-            time.sleep(0.1)
+            time.sleep(0.05)
             while True:
                 try:
                     data = sock.recv(8192)
                 except:
                     break
                 #print("Receiving " + str(data))
-                session.parse_message(data)
-                        
+                gamestate = session.parse_message(data)
+                
             if session.last_message_num == 0:
                 
                 break
-        gamestate = session.gamestate
-        print("Score:  {} - {}".format(gamestate.redscore, gamestate.bluescore))  
+        sock.sendto(session.get_exit_message(), addr)
+              
+        print("Score:   {} - {}".format(gamestate.redscore, gamestate.bluescore))  
         time_left = gamestate.time
         minutes = time_left//6000
         seconds = (time_left - (minutes*6000)) // 100
-        print("Time:   {}:{:0>2}".format(minutes, seconds))  
+        print("Time:    {}:{:0>2}".format(minutes, seconds))  
+        time_out = gamestate.timeout
+        minutes = time_out//6000
+        seconds = (time_out - (minutes*6000)) // 100
+        print("Timeout: {}:{:0>2}".format(minutes, seconds))  
         period = gamestate.period
         if period == 0:
             period = "Warmup"
-        print("Period: {}".format(period))  
+        print("Period:  {}".format(period))  
         print("Players:")
         format = "{:<4}{:<30}{:<8}{:<5}{:<5}"
-        print(format.format("I", "NAME", "TEAM", "G", "A"))
+        print(format.format("#", "NAME", "TEAM", "G", "A"))
         for player in gamestate.players.values():
-            if player["team"] == -1:
-                team = "SPEC"
-            elif player["team"] == 0:
-                team = "RED"
-            elif player["team"] == 1:
-                team = "BLUE"
+            team = int_to_team(player["team"])
             index = str(player["index"])
             if player["index"] == gamestate.you:
                 index += "*"
-            print(format.format(index, player["name"], team, player["goal"], player["assist"]))            
-        sock.sendto(session.get_exit_message(), addr)
+            print(format.format(index, player["name"], team, player["goal"], player["assist"]))
+        if show_log:
+            player_list = {}
+            log_entries = []
+            events = gamestate.events
+            format = "{:<6}{:<4}{:<32}{:<6}{}"
+            print(format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))  
+            for msg in events:
+                hqm.update_player_list(player_list, msg)
+                type = msg["type"]
+                if type=="JOIN":
+                    i = msg["player"]
+                    name = msg["name"]
+                    team = int_to_team(msg["team"])
+                    message = ""
+                elif type=="EXIT":
+                    i = msg["player"]
+                    name = msg["name"]
+                    team = ""
+                    message = ""
+                elif type=="GOAL":
+                    i = ""        
+                    name = ""
+                    team = int_to_team(msg["team"])
+                    scoring = player_list.get(msg["scoring_player"])
+                    assisting = player_list.get(msg["assisting_player"])
+                    if assisting:
+                        message = "{}(#{}), assisted by {}(#{})".format(
+                            scoring["name"], scoring["index"], assisting ["name"], assisting ["index"])
+                    else:
+                        message = "{}(#{}) ".format(
+                            scoring["name"], scoring["index"])
+                elif type=="CHAT":
+                    i = msg["player"]
+                    if i==-1:
+                        i = ""
+                        name = ""
+                        team = ""
+                    else:
+                        chatter = player_list.get(i)
+                        name = chatter["name"]
+                        team = int_to_team(chatter["team"])
+                    message = msg["message"]
+                print(format.format(type, i, name, team, message))     
+         
+
+        
+        
+        
+
     
 def server_info(args):
     if len(args)>0 and args[0] == "public":

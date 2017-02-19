@@ -120,6 +120,27 @@ def make_info_request_cmessage(version, ping):
     bw.write_unsigned(32, ping) # Value is used for ping calculations
     return bw.get_bytes()
     
+def update_player_list(list, msg):
+    if msg["type"] == "JOIN":
+        player_obj = list.get(msg["player"], {})
+        player_obj["team"] = msg["team"]
+        player_obj["name"] = msg["name"]
+        player_obj["obj"] = msg["offset"]
+        player_obj["index"] = msg["player"]
+        if "goal" not in player_obj:
+            player_obj["goal"] = 0
+        if "assist" not in player_obj:
+            player_obj["assist"] = 0
+        list[msg["player"]] = player_obj
+    elif msg["type"] == "EXIT":
+        del list[msg["player"]]
+    elif msg["type"] == "GOAL":
+        scoring = list.get(msg["scoring_player"])
+        assisting = list.get(msg["assisting_player"])
+        if scoring:
+            scoring["goal"]+=1
+        if assisting:
+            assisting["assist"]+=1
     
 class HQMGameState:
     def __init__(self, id):
@@ -132,7 +153,7 @@ class HQMGameState:
         self.bluescore = 0
         self.time = 0
         self.timeout = 0
-        self.you = -1
+        self.you = None
         self.saved_states = {}
         self.players = {}
         self.events = []
@@ -312,26 +333,7 @@ class HQMClientSession:
             if i < self.gamestate.msg_pos:
                 continue
             
-            if msg["type"] == "JOIN":
-                player_obj = self.gamestate.players.get(msg["player"], {})
-                player_obj["team"] = msg["team"]
-                player_obj["name"] = msg["name"]
-                player_obj["obj"] = msg["offset"]
-                player_obj["index"] = msg["player"]
-                if "goal" not in player_obj:
-                    player_obj["goal"] = 0
-                if "assist" not in player_obj:
-                    player_obj["assist"] = 0
-                self.gamestate.players[msg["player"]] = player_obj
-            elif msg["type"] == "EXIT":
-                del self.gamestate.players[msg["player"]]
-            elif msg["type"] == "GOAL":
-                scoring = self.gamestate.players.get(msg["scoring_player"])
-                assisting = self.gamestate.players.get(msg["assisting_player"])
-                if scoring:
-                    scoring["goal"]+=1
-                if assisting:
-                    assisting["assist"]+=1
+            update_player_list(self.gamestate.players, msg)
             self.gamestate.events.append(msg)
         self.gamestate.msg_pos = max(self.gamestate.msg_pos, msg_pos+message_num)
 
@@ -361,7 +363,7 @@ class HQMClientSession:
             msg["assisting_player"] = br.read_unsigned_or_minus_one(6)
         elif type==2: #Normal chat
             msg["type"] = "CHAT"
-            msg["player"] = br.read_unsigned(6)
+            msg["player"] = br.read_unsigned_or_minus_one(6)
             msg["size"] = br.read_unsigned(6)
             #print(msg["size"])
             name = []
