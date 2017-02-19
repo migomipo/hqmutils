@@ -82,6 +82,7 @@ def state(args):
                 index += "*"
             print(format.format(index, player["name"], team, player["goal"], player["assist"]))
         if show_log:
+            print("Log:")
             player_list = {}
             log_entries = []
             events = gamestate.events

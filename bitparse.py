@@ -1,8 +1,5 @@
 import struct
 
-from calc3d import Vector3D
-
-
 class CSBitWriter():
 
 
