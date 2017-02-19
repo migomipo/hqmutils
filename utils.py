@@ -109,9 +109,11 @@ def state(args):
                     if assisting:
                         message = "{}(#{}), assisted by {}(#{})".format(
                             scoring["name"], scoring["index"], assisting ["name"], assisting ["index"])
-                    else:
+                    elif scoring:
                         message = "{}(#{}) ".format(
                             scoring["name"], scoring["index"])
+                    else:
+                        message = ""
                 elif type=="CHAT":
                     i = msg["player"]
                     if i==-1:
