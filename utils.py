@@ -2,6 +2,7 @@ import sys
 import socket
 import hqm
 import time
+import asyncio
 
 master_addr = "216.55.186.104"
 master_port = 27590
@@ -27,7 +28,78 @@ def int_to_team(n):
     elif n == 1:
         team = "BLUE"
     return team
+    
+    
+def get_log_line(msg, format, player_list):
+    type = msg["type"]
+    if type=="JOIN":
+        i = msg["player"]
+        name = msg["name"]
+        team = int_to_team(msg["team"])
+        message = ""
+    elif type=="EXIT":
+        i = msg["player"]
+        name = msg["name"]
+        team = ""
+        message = ""
+    elif type=="GOAL":
+        i = ""        
+        name = ""
+        team = int_to_team(msg["team"])
+        scoring = player_list.get(msg["scoring_player"])
+        assisting = player_list.get(msg["assisting_player"])
+        if assisting:
+            message = "{}(#{}), assisted by {}(#{})".format(
+                scoring["name"], scoring["index"], assisting ["name"], assisting ["index"])
+        elif scoring:
+            message = "{}(#{}) ".format(
+                scoring["name"], scoring["index"])
+        else:
+            message = ""
+    elif type=="CHAT":
+        i = msg["player"]
+        if i==-1:
+            i = ""
+            name = ""
+            team = ""
+        else:
+            chatter = player_list.get(i)
+            name = chatter["name"]
+            team = int_to_team(chatter["team"])
+        message = msg["message"]
+    return format.format(type, i, name, team, message) 
 
+
+class StateClientProtocol:
+    def __init__(self, loop):
+        self.loop = loop
+        
+    def connection_made(self, transport):
+        self.transport = transport
+        self.session = hqm.HQMClientSession("MigoMibot",55)
+
+        async def periodic():
+            while True:
+                self.transport.sendto(self.session.get_message())
+                try:
+                    await asyncio.sleep(0.1)   
+                except asyncio.CancelledError:
+                    break  
+                  
+            
+        self.periodic = self.loop.create_task(periodic())
+
+    def datagram_received(self, data, addr):
+        self.gamestate = self.session.parse_message(data)
+        if self.session.last_message_num == 0:  
+            self.transport.sendto(self.session.get_exit_message(), addr) 
+            self.transport.close()
+            
+    def connection_lost(self, exc):
+       self.periodic.add_done_callback(lambda f: self.loop.stop())
+       self.periodic.cancel()
+       
+    
 def state(args):
     if len(args)<2:
         print("Usage: state <ip> <port>");
@@ -37,103 +109,114 @@ def state(args):
     addr = (ip, port)
 
     show_log = "-l" in args
-
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.setblocking(False)
-        session = hqm.HQMClientSession("MigoMibot",55)
-        while True:
-            send = session.get_message()
-            #print("Sending " + str(send))
-            sock.sendto(session.get_message(), addr)
-            time.sleep(0.05)
-            while True:
-                try:
-                    data = sock.recv(8192)
-                except:
-                    break
-                #print("Receiving " + str(data))
-                gamestate = session.parse_message(data)
-                
-            if session.last_message_num == 0:
-                
-                break
-        sock.sendto(session.get_exit_message(), addr)
-              
-        print("Score:   {} - {}".format(gamestate.redscore, gamestate.bluescore))  
-        time_left = gamestate.time
-        minutes = time_left//6000
-        seconds = (time_left - (minutes*6000)) // 100
-        print("Time:    {}:{:0>2}".format(minutes, seconds))  
-        time_out = gamestate.timeout
-        minutes = time_out//6000
-        seconds = (time_out - (minutes*6000)) // 100
-        print("Timeout: {}:{:0>2}".format(minutes, seconds))  
-        period = gamestate.period
-        if period == 0:
-            period = "Warmup"
-        print("Period:  {}".format(period))  
-        print("Players:")
-        format = "{:<4}{:<30}{:<8}{:<5}{:<5}"
-        print(format.format("#", "NAME", "TEAM", "G", "A"))
-        for player in gamestate.players.values():
-            team = int_to_team(player["team"])
-            index = str(player["index"])
-            if player["index"] == gamestate.you:
-                index += "*"
-            print(format.format(index, player["name"], team, player["goal"], player["assist"]))
-        if show_log:
-            print("Log:")
-            player_list = {}
-            log_entries = []
-            events = gamestate.events
-            format = "{:<6}{:<4}{:<32}{:<6}{}"
-            print(format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))  
-            for msg in events:
-                hqm.update_player_list(player_list, msg)
-                type = msg["type"]
-                if type=="JOIN":
-                    i = msg["player"]
-                    name = msg["name"]
-                    team = int_to_team(msg["team"])
-                    message = ""
-                elif type=="EXIT":
-                    i = msg["player"]
-                    name = msg["name"]
-                    team = ""
-                    message = ""
-                elif type=="GOAL":
-                    i = ""        
-                    name = ""
-                    team = int_to_team(msg["team"])
-                    scoring = player_list.get(msg["scoring_player"])
-                    assisting = player_list.get(msg["assisting_player"])
-                    if assisting:
-                        message = "{}(#{}), assisted by {}(#{})".format(
-                            scoring["name"], scoring["index"], assisting ["name"], assisting ["index"])
-                    elif scoring:
-                        message = "{}(#{}) ".format(
-                            scoring["name"], scoring["index"])
-                    else:
-                        message = ""
-                elif type=="CHAT":
-                    i = msg["player"]
-                    if i==-1:
-                        i = ""
-                        name = ""
-                        team = ""
-                    else:
-                        chatter = player_list.get(i)
-                        name = chatter["name"]
-                        team = int_to_team(chatter["team"])
-                    message = msg["message"]
-                print(format.format(type, i, name, team, message))     
-         
-
-        
-        
-        
-
     
+    loop = asyncio.get_event_loop()
+    connect = loop.create_datagram_endpoint(lambda: StateClientProtocol(loop), remote_addr=addr)
+    transport, protocol = loop.run_until_complete(connect)
+    
+    loop.run_forever()
+    transport.close()
+    loop.close()
+
+    gamestate = protocol.gamestate
+              
+    print("Score:   {} - {}".format(gamestate.redscore, gamestate.bluescore))  
+    time_left = gamestate.time
+    minutes = time_left//6000
+    seconds = (time_left - (minutes*6000)) // 100
+    print("Time:    {}:{:0>2}".format(minutes, seconds))  
+    time_out = gamestate.timeout
+    minutes = time_out//6000
+    seconds = (time_out - (minutes*6000)) // 100
+    print("Timeout: {}:{:0>2}".format(minutes, seconds))  
+    period = gamestate.period
+    if period == 0:
+        period = "Warmup"
+    print("Period:  {}".format(period))  
+    print("Players:")
+    format = "{:<4}{:<30}{:<8}{:<5}{:<5}"
+    print(format.format("#", "NAME", "TEAM", "G", "A"))
+    for player in gamestate.players.values():
+        team = int_to_team(player["team"])
+        index = str(player["index"])
+        if player["index"] == gamestate.you:
+            index += "*"
+        print(format.format(index, player["name"], team, player["goal"], player["assist"]))
+    if show_log:
+        print("Log:")
+        player_list = {}
+        events = gamestate.events
+        format = "{:<6}{:<4}{:<32}{:<6}{}"
+        print(format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))  
+        for msg in events:
+            hqm.update_player_list(player_list, msg)
+            
+            print(get_log_line(msg, format, player_list))  
+
+             
+                
+class MonitorClientProtocol:
+    def __init__(self, loop):
+        self.loop = loop
+        self.format = "{:<6}{:<4}{:<32}{:<6}{}"
+        
+    def connection_made(self, transport):
+        self.transport = transport
+        self.session = hqm.HQMClientSession("MigoMibot",55)
+        self.last_msg_pos = 0
+        self.player_list = {}
+        print(self.format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))
+
+        async def periodic():
+            while True:
+                self.transport.sendto(self.session.get_message())
+                try:
+                    await asyncio.sleep(0.1)   
+                except asyncio.CancelledError:
+                    break     
+                
+        self.periodic = self.loop.create_task(periodic())
+
+    def datagram_received(self, data, addr):
+        self.addr = addr
+        gamestate = self.session.parse_message(data)
+        if gamestate and gamestate.msg_pos>self.last_msg_pos:
+            events = gamestate.events[self.last_msg_pos:gamestate.msg_pos]
+            self.last_msg_pos = gamestate.msg_pos
+            for msg in events:
+                hqm.update_player_list(self.player_list, msg)
+                print(get_log_line(msg, self.format, self.player_list)) 
+
+    def connection_lost(self, exc):
+        print(exc)
+    
+    def stop(self):   
+        self.transport.sendto(self.session.get_exit_message(), self.addr)   
+        self.periodic.cancel()  
+        self.loop.run_until_complete(self.periodic)  
+        self.loop.stop()         
+                
+def monitor(args):
+    if len(args)<2:
+        print("Usage: monitor <ip> <port>");
+        return  
+    ip = args[0]
+    port = int(args[1])
+    addr = (ip, port)
+    
+    loop = asyncio.get_event_loop()
+    connect = loop.create_datagram_endpoint(lambda: MonitorClientProtocol(loop), remote_addr=addr)
+    transport, protocol = loop.run_until_complete(connect)
+    try:
+        loop.run_forever()
+    except KeyboardInterrupt:
+        pass
+    protocol.stop()
+    transport.close()
+    loop.close()
+
+  
+
 def server_info(args):
     if len(args)>0 and args[0] == "public":
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -214,7 +297,8 @@ def get_server_info(sock, addresses):
 commands = {
     "help": print_help,
     "info": server_info,
-    "state": state
+    "state": state,
+    "monitor": monitor
 }
 
 if __name__ == "__main__":

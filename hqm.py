@@ -159,7 +159,42 @@ class HQMGameState:
         self.events = []
         
         
+class HQMObjectState(dict):
+    pass
     
+    def calculate_positions(self):
+        pos_x = convert_pos(self["pos_x_int"])
+        pos_y = convert_pos(self["pos_y_int"])
+        pos_z = convert_pos(self["pos_z_int"])
+        
+        self["pos"] = (pos_x, pos_y, pos_z)
+        
+        rot_a = convert_rot_vector(self["rot_a_int"], 31)
+        rot_b = convert_rot_vector(self["rot_b_int"], 31)
+        if rot_a is not None and rot_b is not None:
+           self["rot"] = Matrix3D.from_columns(rot_a.cross(rot_b).normal(), rot_a, rot_b)
+        else:
+           self["rot"] = None        
+        
+        if(self["type"]=="PLAYER"):
+                           
+            stick_x = convert_stick_pos(self["stick_x_int"], pos_x)
+            stick_y = convert_stick_pos(self["stick_y_int"], pos_y) 
+            stick_z = convert_stick_pos(self["stick_z_int"], pos_z)                
+                
+            obj["stick_pos"] = (stick_x, stick_y, stick_z)    
+                
+            stick_rot_a = convert_rot_vector(self["stick_rot_a_int"], 25)
+            stick_rot_b = convert_rot_vector(self["stick_rot_b_int"], 25)
+            if stick_rot_a is not None and stick_rot_b is not None:
+                self["stick_rot"] = Matrix3D.from_columns(
+                       stick_rot_a.cross(stick_rot_b).normal(), stick_rot_a, stick_rot_b)
+            else:
+                self["stick_rot"] = None                
+            
+            self["head_rot"] = convert_unknown_rot(self["head_rot_int"])
+            self["body_rot"] = convert_unknown_rot(self["body_rot_int"])        
+
 class HQMClientSession:
     def __init__(self, username, version):
         self.username = username
@@ -253,15 +288,15 @@ class HQMClientSession:
         old_packet &= 0xff
            
         if cur_packet not in self.gamestate.saved_states:
-            self.gamestate.saved_states[cur_packet] = {}
+            self.gamestate.saved_states[cur_packet] = HQMObjectState()
         if old_packet not in self.gamestate.saved_states:
-            self.gamestate.saved_states[old_packet] = {}     
+            self.gamestate.saved_states[old_packet] = HQMObjectState()     
         if i not in self.gamestate.saved_states[old_packet]:
-            old_obj = {}
+            old_obj = HQMObjectState()
         else:
             old_obj = self.gamestate.saved_states[old_packet][i]    
         
-        obj = {}
+        obj = HQMObjectState()
         ingame = br.read_unsigned(1) == 1
         obj["ingame"] = ingame
         if ingame:
@@ -272,52 +307,24 @@ class HQMClientSession:
                 obj["type"] = "PUCK"
             else:
                 obj["type"] = typenum
-            
-            
+                      
             obj["pos_x_int"] = br.read_pos(17, old_obj.get("pos_x_int"))
             obj["pos_y_int"] = br.read_pos(17, old_obj.get("pos_y_int"))
             obj["pos_z_int"] = br.read_pos(17, old_obj.get("pos_z_int"))
             obj["rot_a_int"] = br.read_pos(31, old_obj.get("rot_a_int"))
             obj["rot_b_int"] = br.read_pos(31, old_obj.get("rot_b_int"))
-            
-            pos_x = convert_pos(obj["pos_x_int"])
-            pos_y = convert_pos(obj["pos_y_int"])
-            pos_z = convert_pos(obj["pos_z_int"])
-            
-            rot_a = convert_rot_vector(obj["rot_a_int"], 31)
-            rot_b = convert_rot_vector(obj["rot_b_int"], 31)
-            if rot_a is not None and rot_b is not None:
-                obj["rot"] = Matrix3D.from_columns(rot_a.cross(rot_b).normal(), rot_a, rot_b)
-            else:
-                obj["rot"] = None
-            
-            obj["pos"] = (pos_x, pos_y, pos_z)
+
             if(obj["type"]=="PLAYER"):
                 obj["stick_x_int"] = br.read_pos(13, old_obj.get("stick_x_int"))
                 obj["stick_y_int"] = br.read_pos(13, old_obj.get("stick_y_int"))
                 obj["stick_z_int"] = br.read_pos(13, old_obj.get("stick_z_int"))
-                               
-                stick_x = convert_stick_pos(obj["stick_x_int"], pos_x)
-                stick_y = convert_stick_pos(obj["stick_y_int"], pos_y) 
-                stick_z = convert_stick_pos(obj["stick_z_int"], pos_z)                
-                    
-                obj["stick_pos"] = (stick_x, stick_y, stick_z)    
-                    
+                      
                 obj["stick_rot_a_int"] = br.read_pos(25, old_obj.get("stick_rot_a_int"))     
                 obj["stick_rot_b_int"] = br.read_pos(25, old_obj.get("stick_rot_b_int"))  
-
-                stick_rot_a = convert_rot_vector(obj["stick_rot_a_int"], 25)
-                stick_rot_b = convert_rot_vector(obj["stick_rot_b_int"], 25)
-                if stick_rot_a is not None and stick_rot_b is not None:
-                    obj["stick_rot"] = Matrix3D.from_columns(
-                           stick_rot_a.cross(stick_rot_b).normal(), stick_rot_a, stick_rot_b)
-                else:
-                    obj["stick_rot"] = None                
+            
                 obj["head_rot_int"] = br.read_pos(16, old_obj.get("head_rot_int"))    
                 obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
-                
-                obj["head_rot"] = convert_unknown_rot(obj["head_rot_int"])
-                obj["body_rot"] = convert_unknown_rot(obj["body_rot_int"])
+
 
             
         self.gamestate.saved_states[self.gamestate.packet&0xff][i] = obj;
