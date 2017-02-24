@@ -1,3 +1,6 @@
+# Copyright © 2017, John Eriksson
+# See LICENSE for terms of use
+
 import sys
 import socket
 import hqm

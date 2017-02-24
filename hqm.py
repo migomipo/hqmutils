@@ -1,3 +1,7 @@
+# Copyright © 2017, John Eriksson
+# https://github.com/migomipo/hqmutils
+# See LICENSE for terms of use
+
 from bitparse import CSBitReader
 from bitparse import CSBitWriter
 import struct

@@ -1,3 +1,7 @@
+# Copyright © 2016-2017, John Eriksson
+# https://github.com/migomipo/hqmutils
+# See LICENSE for terms of use
+
 import struct
 
 class CSBitWriter():

@@ -1,3 +1,6 @@
+# Copyright © 2016-2017, John Eriksson
+# https://github.com/migomipo/hqmutils
+# See LICENSE for terms of use
 
 from enum import Enum
 import socket
