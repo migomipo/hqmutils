@@ -1,11 +1,11 @@
 # Copyright © 2017, John Eriksson
+# https://github.com/migomipo/hqmutils
 # See LICENSE for terms of use
 
 import sys
 import socket
 import hqm
 import time
-import asyncio
 
 master_addr = "216.55.186.104"
 master_port = 27590
@@ -14,10 +14,11 @@ master = (master_addr, master_port)
 def print_help(args=None):
     print("MigoMipo HQM Utils © John Eriksson 2017")
     print("Commands:")
-    print("  info <ip> <port> : Shows info about a specific server")
-    print("  info public      : Shows info about all public servers")
-    print("  state <ip> <port>: Joins a server and prints information")
-
+    print("  info <ip> <port>     : Shows info about a specific server")
+    print("  info public          : Shows info about all public servers")
+    print("  state <ip> <port>    : Joins a server, prints information and leaves")
+    print("  state <ip> <port> -l : Also prints a log of all received events")
+    print("  monitor <ip> <port>  : Joins a server and log all events until interrupted")
     
 def get_millis_truncated():
     return int(round(time.time() * 1000)) & 0xffffffff
@@ -73,36 +74,7 @@ def get_log_line(msg, format, player_list):
     return format.format(type, i, name, team, message) 
 
 
-class StateClientProtocol:
-    def __init__(self, loop):
-        self.loop = loop
-        
-    def connection_made(self, transport):
-        self.transport = transport
-        self.session = hqm.HQMClientSession("MigoMibot",55)
-
-        async def periodic():
-            while True:
-                self.transport.sendto(self.session.get_message())
-                try:
-                    await asyncio.sleep(0.1)   
-                except asyncio.CancelledError:
-                    break  
-                  
-            
-        self.periodic = self.loop.create_task(periodic())
-
-    def datagram_received(self, data, addr):
-        self.gamestate = self.session.parse_message(data)
-        if self.session.last_message_num == 0:  
-            self.transport.sendto(self.session.get_exit_message(), addr) 
-            self.transport.close()
-            
-    def connection_lost(self, exc):
-       self.periodic.add_done_callback(lambda f: self.loop.stop())
-       self.periodic.cancel()
-       
-    
+           
 def state(args):
     if len(args)<2:
         print("Usage: state <ip> <port>");
@@ -112,16 +84,23 @@ def state(args):
     addr = (ip, port)
 
     show_log = "-l" in args
-    
-    loop = asyncio.get_event_loop()
-    connect = loop.create_datagram_endpoint(lambda: StateClientProtocol(loop), remote_addr=addr)
-    transport, protocol = loop.run_until_complete(connect)
-    
-    loop.run_forever()
-    transport.close()
-    loop.close()
-
-    gamestate = protocol.gamestate
+    gamestate = None
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setblocking(False)
+        session = hqm.HQMClientSession("MigoMibot",55)
+        while True:
+            send = session.get_message()
+            sock.sendto(session.get_message(), addr)
+            while True:
+                try:
+                    data = sock.recv(8192)
+                    gamestate = session.parse_message(data)
+                except:
+                    break
+            if session.last_message_num==0:
+                break
+            time.sleep(0.05) 
+        sock.sendto(session.get_exit_message(), addr)
               
     print("Score:   {} - {}".format(gamestate.redscore, gamestate.bluescore))  
     time_left = gamestate.time
@@ -152,52 +131,8 @@ def state(args):
         format = "{:<6}{:<4}{:<32}{:<6}{}"
         print(format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))  
         for msg in events:
-            hqm.update_player_list(player_list, msg)
-            
-            print(get_log_line(msg, format, player_list))  
-
-             
-                
-class MonitorClientProtocol:
-    def __init__(self, loop):
-        self.loop = loop
-        self.format = "{:<6}{:<4}{:<32}{:<6}{}"
-        
-    def connection_made(self, transport):
-        self.transport = transport
-        self.session = hqm.HQMClientSession("MigoMibot",55)
-        self.last_msg_pos = 0
-        self.player_list = {}
-        print(self.format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))
-
-        async def periodic():
-            while True:
-                self.transport.sendto(self.session.get_message())
-                try:
-                    await asyncio.sleep(0.1)   
-                except asyncio.CancelledError:
-                    break     
-                
-        self.periodic = self.loop.create_task(periodic())
-
-    def datagram_received(self, data, addr):
-        self.addr = addr
-        gamestate = self.session.parse_message(data)
-        if gamestate and gamestate.msg_pos>self.last_msg_pos:
-            events = gamestate.events[self.last_msg_pos:gamestate.msg_pos]
-            self.last_msg_pos = gamestate.msg_pos
-            for msg in events:
-                hqm.update_player_list(self.player_list, msg)
-                print(get_log_line(msg, self.format, self.player_list)) 
-
-    def connection_lost(self, exc):
-        print(exc)
-    
-    def stop(self):   
-        self.transport.sendto(self.session.get_exit_message(), self.addr)   
-        self.periodic.cancel()  
-        self.loop.run_until_complete(self.periodic)  
-        self.loop.stop()         
+            hqm.update_player_list(player_list, msg)           
+            print(get_log_line(msg, format, player_list))                
                 
 def monitor(args):
     if len(args)<2:
@@ -207,16 +142,35 @@ def monitor(args):
     port = int(args[1])
     addr = (ip, port)
     
-    loop = asyncio.get_event_loop()
-    connect = loop.create_datagram_endpoint(lambda: MonitorClientProtocol(loop), remote_addr=addr)
-    transport, protocol = loop.run_until_complete(connect)
-    try:
-        loop.run_forever()
-    except KeyboardInterrupt:
-        pass
-    protocol.stop()
-    transport.close()
-    loop.close()
+    gamestate = None
+    last_msg_pos = 0
+    format = "{:<6}{:<4}{:<32}{:<6}{}"
+    player_list = {}
+    print(format.format("TYPE", "#", "NAME", "TEAM", "MESSAGE"))  
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setblocking(False)
+        session = hqm.HQMClientSession("MigoMibot",55)
+        try:
+            while True:
+                send = session.get_message()
+                sock.sendto(session.get_message(), addr)
+                while True:
+                    try:
+                        data = sock.recv(8192)
+                        gamestate = session.parse_message(data)
+                        if(gamestate.msg_pos>last_msg_pos):
+                            events = gamestate.events[last_msg_pos:gamestate.msg_pos]
+                            last_msg_pos = gamestate.msg_pos
+                            for msg in events:
+                                hqm.update_player_list(player_list, msg)
+                                print(get_log_line(msg, format, player_list)) 
+                    except OSError:
+                        break
+
+                time.sleep(0.05) 
+        except KeyboardInterrupt:
+            pass
+        sock.sendto(session.get_exit_message(), addr)
 
   
 
