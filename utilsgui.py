@@ -508,7 +508,6 @@ class HQMServerGUI(QWidget):
             
            
     def reset_log(self, gameID):
-        print("Reset")
         self.last_msg_pos = 0
         self.player_list = {}
         self.gameID = gameID 
