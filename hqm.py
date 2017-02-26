@@ -162,6 +162,11 @@ class HQMGameState:
         self.players = {}
         self.events = []
         
+    def copy_state(self, other):
+        self.saved_states = other.saved_states.copy()
+        self.players = other.players.copy()
+        self.events = other.events[:]
+        
         
 class HQMObjectState(dict):
     pass
@@ -254,6 +259,7 @@ class HQMClientSession:
                 self.state = "ingame"
                 self.gamestate = HQMGameState()
             self.parse_game_update(br)
+            
         else:
             # Unknown type
             return None
@@ -266,36 +272,36 @@ class HQMClientSession:
         simstep = br.read_unsigned_aligned(32)
         if simstep<self.gamestate.simstep and self.gamestate.simstep-simstep<100:
             return
-        self.gamestate.simstep = simstep
-        self.gamestate.gameover = br.read_unsigned(1)
-        self.gamestate.redscore = br.read_unsigned(8)
-        self.gamestate.bluescore = br.read_unsigned(8)
-        self.gamestate.time = br.read_unsigned(16)
-        self.gamestate.timeout = br.read_unsigned(16)
-        self.gamestate.period = br.read_unsigned(8)
-        self.gamestate.you = br.read_unsigned(8)
+        self.new_gamestate = HQMGameState(gameID)
+        self.new_gamestate.copy_state(self.gamestate)
+        self.new_gamestate.simstep = simstep
+        self.new_gamestate.gameover = br.read_unsigned(1)
+        self.new_gamestate.redscore = br.read_unsigned(8)
+        self.new_gamestate.bluescore = br.read_unsigned(8)
+        self.new_gamestate.time = br.read_unsigned(16)
+        self.new_gamestate.timeout = br.read_unsigned(16)
+        self.new_gamestate.period = br.read_unsigned(8)
+        self.new_gamestate.you = br.read_unsigned(8)
         self.parse_objects(br)
         self.parse_messages(br)
-        
+        self.gamestate = self.new_gamestate
 
         
     def parse_objects(self, br):
         cur_packet = br.read_unsigned_aligned(32)
         old_packet = br.read_unsigned_aligned(32)
+        cur_packet_mask = cur_packet & 0xff
+        old_packet_mask = old_packet & 0xff
+        self.new_gamestate.saved_states[cur_packet_mask] = {}
         for i in range(32):
-            self.parse_object(br, i, cur_packet, old_packet)
-        self.gamestate.packet = cur_packet
-        pass
+            self.parse_object(br, i, cur_packet_mask, old_packet_mask)
+        self.new_gamestate.packet = cur_packet
         
     def parse_object(self, br, i, cur_packet, old_packet):
-        cur_packet &= 0xff
-        old_packet &= 0xff
            
-        if cur_packet not in self.gamestate.saved_states:
-            self.gamestate.saved_states[cur_packet] = HQMObjectState()
         if old_packet not in self.gamestate.saved_states:
-            self.gamestate.saved_states[old_packet] = HQMObjectState()     
-        if i not in self.gamestate.saved_states[old_packet]:
+            old_obj = HQMObjectState()
+        elif i not in self.gamestate.saved_states[old_packet]:
             old_obj = HQMObjectState()
         else:
             old_obj = self.gamestate.saved_states[old_packet][i]    
@@ -328,10 +334,8 @@ class HQMClientSession:
             
                 obj["head_rot_int"] = br.read_pos(16, old_obj.get("head_rot_int"))    
                 obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
-
-
-            
-        self.gamestate.saved_states[self.gamestate.packet&0xff][i] = obj;
+      
+        self.new_gamestate.saved_states[cur_packet][i] = obj;
    
     def parse_messages(self, br):
         message_num = br.read_unsigned(4)
@@ -344,9 +348,9 @@ class HQMClientSession:
             if i < self.gamestate.msg_pos:
                 continue
             
-            update_player_list(self.gamestate.players, msg)
-            self.gamestate.events.append(msg)
-        self.gamestate.msg_pos = max(self.gamestate.msg_pos, msg_pos+message_num)
+            update_player_list(self.new_gamestate.players, msg)
+            self.new_gamestate.events.append(msg)
+        self.new_gamestate.msg_pos = max(self.gamestate.msg_pos, msg_pos+message_num)
 
         
     def parse_state_message(self, br):
