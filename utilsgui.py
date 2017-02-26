@@ -606,11 +606,12 @@ class HQMUtilsGUI(QWidget):
         
         def on_close(ip, port):
             del self.server_gui[(ip, port)]
-        
-        self.server_gui[(ip, port)] = HQMServerGUI(ip, port)
-        self.server_gui[(ip, port)].closedServerDialog.connect(on_close)      
+        if (ip, port) not in self.server_gui:
+            self.server_gui[(ip, port)] = HQMServerGUI(ip, port)
+            self.server_gui[(ip, port)].closedServerDialog.connect(on_close)      
         self.server_gui[(ip, port)].show()
-        
+        self.server_gui[(ip, port)].setWindowState(Qt.WindowActive)
+        self.server_gui[(ip, port)].activateWindow()
         
     def remove_server(self):
         row = self.table.selectionModel().currentIndex();
