@@ -4,6 +4,7 @@
 
 from bitparse import CSBitReader
 from bitparse import CSBitWriter
+from collections import deque
 import struct
 from calc3d import *   
 
@@ -212,6 +213,11 @@ class HQMClientSession:
         self.state = "join"
         self.gamestate = None
         self.last_message_num = None
+        self.chat_messages = deque()
+        self.chat_message_index = 0
+        
+    def add_chat(self, str):
+        self.chat_messages.append(str)
         
     def get_message(self):
         bw = CSBitWriter()
@@ -236,7 +242,16 @@ class HQMClientSession:
             bw.write_unsigned_aligned(32, 0) # Input keys, such as jump, crouch, join team
             bw.write_unsigned_aligned(32, self.gamestate.packet) # Last read packet
             bw.write_unsigned_aligned(16, self.gamestate.msg_pos) # Last received message
-            bw.write_unsigned(1, 0) #No chat support at the moment
+            if len(self.chat_messages) != 0:
+                self.chat_message_index = (self.chat_message_index+1) & 7 
+                bw.write_unsigned(1, 1)
+                bw.write_unsigned(3, self.chat_message_index)             
+                message = self.chat_messages.popleft().encode("iso-8859-1")
+                message_len = min(255, len(message))
+                bw.write_unsigned(8, message_len)
+                bw.write_bytes_aligned(message[0:message_len])
+            else:    
+                bw.write_unsigned(1, 0)
         return bw.get_bytes()
         
     def get_exit_message(self):

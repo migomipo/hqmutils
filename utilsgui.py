@@ -365,6 +365,15 @@ class HQMServerGUI(QWidget):
         self.chat_button = QPushButton("Chat")
         self.chat_hide = QCheckBox("Hide text")
         
+        def chat():
+            text = self.chat_field.text()
+            print(text)
+            self.chat_field.clear()
+            self.session.add_chat(text)
+        
+        self.chat_button.clicked.connect(chat)
+        self.chat_field.returnPressed.connect(chat)
+        
         def chat_hide(state):
             if state==2:
                 self.chat_field.setEchoMode(QLineEdit.Password)
@@ -488,7 +497,7 @@ class HQMServerGUI(QWidget):
             if scoring:
                 insert_player(cursor, scoring["name"], scoring["index"])
                 if assisting:
-                    cursor.insertText("(assisted by ")
+                    cursor.insertText(" (assisted by ")
                     insert_player(cursor, assisting["name"], assisting["index"])
                     cursor.insertText(")")
             else:
