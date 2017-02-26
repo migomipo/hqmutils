@@ -367,7 +367,6 @@ class HQMServerGUI(QWidget):
         
         def chat():
             text = self.chat_field.text()
-            print(text)
             self.chat_field.clear()
             self.session.add_chat(text)
         
