@@ -334,7 +334,7 @@ class HQMServerGUI(QWidget):
         self.socket.readyRead.connect(self._on_ready_read)
         self.last_msg_pos = 0
         self.gameID = 0
-        self.session = hqm.HQMClientSession("MigoMibot",55)
+        self.session = hqm.HQMClientSession("HQM Utils Server Browser",55)
         self.player_list = {}
         
         main_layout = QGridLayout()
