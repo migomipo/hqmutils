@@ -155,6 +155,7 @@ class HQMGameState:
         self.gameover = 0
         self.redscore = 0
         self.bluescore = 0
+        self.period = 0
         self.time = 0
         self.timeout = 0
         self.you = None

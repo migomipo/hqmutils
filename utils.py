@@ -245,17 +245,17 @@ def get_server_info(sock, addresses):
             del start_data[addr]
     for addr in start_data:
         print("{:<17}{:<8}TIMED OUT".format(addr[0], addr[1]))
+        
+def gui(ignored):
+    import utilsgui
+    utilsgui.show_gui()
             
-          
-            
-            
-    
-
 commands = {
     "help": print_help,
     "info": server_info,
     "state": state,
-    "monitor": monitor
+    "monitor": monitor,
+    "gui": gui
 }
 
 if __name__ == "__main__":

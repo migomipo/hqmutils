@@ -327,6 +327,8 @@ class HQMServerGUI(QWidget):
         QWidget.__init__(self)
         self.ip = ip
         self.port = port
+        self.setWindowTitle("{}:{}".format(self.ip.toString(), self.port))
+        
         self.socket = QUdpSocket()
         self.socket.connectToHost(self.ip, self.port)
         self.socket.readyRead.connect(self._on_ready_read)
@@ -464,7 +466,7 @@ class HQMServerGUI(QWidget):
                 cursor.insertText(" has joined ")             
                 insert_team(cursor, team)
             else:
-                cursor.insertText(" has exited.")
+                cursor.insertText(" has exited")
             cursor.insertText(".\n") 
         elif msg["type"]=="CHAT":
             i = msg["player"]
@@ -517,6 +519,7 @@ class HQMUtilsGUI(QWidget):
         QWidget.__init__(self)
                 
         self.server_gui = {}
+        self.setWindowTitle("HQM Utils GUI")
         
         main_layout = QVBoxLayout()
         
