@@ -52,16 +52,18 @@ class ServerListTableModel(QAbstractTableModel):
             host = QHostAddress(host.toIPv4Address())
             if host==master_addr and data.startswith(b"Hock!") and self.use_public:
                 addresses = hqm.parse_server_list(data)
-                self.layoutAboutToBeChanged.emit()
-                
+                new_servers = []
                 for ip, port in addresses:
                     ip = QHostAddress(ip)
                     addr = (ip, port)
                     if addr not in self.server_map:
                         new_server = {"ip":ip, "port":port}
-                        self.servers.append(new_server)
+                        new_servers.append(new_server)
                         self.server_map[addr] = new_server
-                self.layoutChanged.emit()
+                if len(new_servers)>0:
+                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers)-1)               
+                    self.servers.extend(new_servers)
+                    self.endInsertRows()
             elif self.use_update:
                 host = QHostAddress(host.toIPv4Address())
                 msg = hqm.parse_from_server(data)
