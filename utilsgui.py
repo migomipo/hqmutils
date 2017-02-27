@@ -323,7 +323,7 @@ class ServerUserListTableModel(QAbstractTableModel):
 class HQMServerGUI(QWidget):
     closedServerDialog = pyqtSignal(QHostAddress, int)
 
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, username):
         QWidget.__init__(self)
         self.ip = ip
         self.port = port
@@ -334,13 +334,27 @@ class HQMServerGUI(QWidget):
         self.socket.readyRead.connect(self._on_ready_read)
         self.last_msg_pos = 0
         self.gameID = 0
-        self.session = hqm.HQMClientSession("HQM Utils Server Browser",55)
+        self.session = hqm.HQMClientSession(username,55)
         self.player_list = {}
         
         main_layout = QGridLayout()
         
         self.event_list = QTextEdit()
         self.event_list.setReadOnly(True)
+        
+        
+        self.info_table = QFormLayout()
+        self.info_table.addRow(QLabel("Address"), QLabel(self.ip.toString()))
+        self.info_table.addRow(QLabel("Port"), QLabel(str(self.port)))
+        self.period_label = QLabel()
+        self.info_table.addRow(QLabel("Period"), self.period_label)
+        self.time_label = QLabel()
+        self.info_table.addRow(QLabel("Time"), self.time_label)
+        self.timeout_label = QLabel()
+        self.info_table.addRow(QLabel("Timeout"), self.timeout_label)
+        self.score_label = QLabel()
+        self.info_table.addRow(QLabel("Score"), self.score_label)
+        
         
         self.user_table = QTableView()
         self.user_table_model = ServerUserListTableModel()
@@ -351,14 +365,6 @@ class HQMServerGUI(QWidget):
         self.user_table.setColumnWidth(3, 30)
         self.user_table.setColumnWidth(4, 30)
 
-        
-        
-        self.info_table = QTableView()
-        self.info_table_model = ServerStateInfoTableModel(ip, port)
-        self.info_table.setModel(self.info_table_model)
-        self.info_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.info_table.horizontalHeader().hide();
-        self.info_table.verticalHeader().hide();
         self.chat_field = QLineEdit()
 
         chat_settings = QHBoxLayout()
@@ -387,7 +393,7 @@ class HQMServerGUI(QWidget):
 
         
         main_layout.addWidget(self.event_list, 0, 0, 2, 1)
-        main_layout.addWidget(self.info_table, 0, 1)
+        main_layout.addLayout(self.info_table, 0, 1)
         main_layout.addWidget(self.user_table, 1, 1)
         main_layout.addWidget(self.chat_field, 2, 0)
         main_layout.addLayout(chat_settings, 3, 0)
@@ -411,7 +417,7 @@ class HQMServerGUI(QWidget):
         while self.socket.hasPendingDatagrams():            
             data = self.socket.read(8192)
             self.gamestate = self.session.parse_message(data)
-            self.info_table_model.set_state(self.gamestate)
+            self.update_info_label()
             self.user_table_model.set_state(self.gamestate)
             if self.gameID != self.gamestate.id:  
                 self.reset_log(self.gamestate.id)
@@ -422,8 +428,27 @@ class HQMServerGUI(QWidget):
                     hqm.update_player_list(self.player_list, msg)
                     self.insert_event(msg)
                     
-      
                     
+    def update_info_label(self):
+        period = self.gamestate.period
+        if period == 0:
+            period = "Warmup"
+        else:
+            period = str(period)
+        self.period_label.setText(period)
+        time_left = self.gamestate.time
+        minutes = time_left//6000
+        seconds = (time_left - (minutes*6000)) // 100
+        self.time_label.setText("{}:{:0>2}".format(minutes, seconds))
+        time_left = self.gamestate.timeout
+        minutes = time_left//6000
+        seconds = (time_left - (minutes*6000)) // 100
+        self.timeout_label.setText("{}:{:0>2}".format(minutes, seconds))
+        self.score_label.setText("<font color='red'>{}</font> - <font color='blue'>{}</font>".format(self.gamestate.redscore, self.gamestate.bluescore))
+        
+
+
+                         
     def insert_event(self, msg):
     
         cursor = self.event_list.textCursor()
@@ -551,8 +576,7 @@ class HQMUtilsGUI(QWidget):
         self.table = QTableView() 
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows);
         self.table.setSelectionMode(QAbstractItemView.SingleSelection);
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu);  
-        self.table.customContextMenuRequested.connect(self.context_menu)
+
         self.model = ServerListTableModel()
         self.proxy_model = ServerListProxyTableModel()
         self.proxy_model.setSourceModel(self.model)
@@ -572,32 +596,47 @@ class HQMUtilsGUI(QWidget):
         self.update_box = QCheckBox("Update servers")
         self.update_box.stateChanged.connect(self.update_servers)
         self.update_box.setCheckState(2)
-        self.clear_button = QPushButton("Clear")
+        self.join_button = QPushButton("Join")
+        self.join_button.clicked.connect(self.show_server)
+        self.clear_button = QPushButton("Remove all")
         self.clear_button.clicked.connect(self.clear_servers)
+        self.remove_button = QPushButton("Remove") 
+        self.remove_button.clicked.connect(self.remove_server)
+       
+        self.user_name_field = QLineEdit()
+        
+        def user_name_changed():
+            text = self.user_name_field.text()
+            self.join_button.setEnabled(self.is_valid_username(text))
+        user_name_changed()
+        self.user_name_field.textChanged.connect(user_name_changed)
         
         lower_box = QGridLayout()
-        lower_box.addWidget(self.load_public_box, 0, 0)
-        lower_box.addWidget(self.update_box, 1, 0)
-        lower_box.setColumnStretch(1,1)
-        lower_box.addWidget(self.clear_button, 1, 2)
-        
+        lower_box.addWidget(QLabel("User name"), 0, 0)
+        lower_box.addWidget(self.user_name_field, 0, 1)
+        lower_box.addWidget(self.load_public_box, 1, 0, 1, 2)
+        lower_box.addWidget(self.update_box, 2, 0, 1, 2)
+       
+        lower_box.setColumnStretch(2,1)
+        lower_box.addWidget(self.remove_button, 0, 3)
+        lower_box.addWidget(self.clear_button, 0, 4)
+        lower_box.addWidget(self.join_button, 0, 5)
+              
         main_layout.addWidget(ip_group)
         main_layout.addWidget(self.table)
         main_layout.addLayout(lower_box)
 
         self.setLayout(main_layout) 
         
-    def context_menu(self, pos):
-        menu = QMenu()
-        show = QAction("Show")
-        show.triggered.connect(self.show_server)
-        remove = QAction("Remove")
-        remove.triggered.connect(self.remove_server)
-        menu.addAction(show)
-        menu.addAction(remove)
-        menu.exec_(self.table.viewport().mapToGlobal(pos))
-        
+    def is_valid_username(self, username):
+        b = username.encode("ascii", "ignore")
+        return len(b)>0
+                         
     def show_server(self):
+        username = self.user_name_field.text()
+        if not self.is_valid_username(username):
+            return
+    
         row = self.table.selectionModel().currentIndex();
         row = self.proxy_model.mapToSource(row).row()
         server = self.model.servers[row]
@@ -607,7 +646,7 @@ class HQMUtilsGUI(QWidget):
         def on_close(ip, port):
             del self.server_gui[(ip, port)]
         if (ip, port) not in self.server_gui:
-            self.server_gui[(ip, port)] = HQMServerGUI(ip, port)
+            self.server_gui[(ip, port)] = HQMServerGUI(ip, port, username)
             self.server_gui[(ip, port)].closedServerDialog.connect(on_close)      
         self.server_gui[(ip, port)].show()
         self.server_gui[(ip, port)].setWindowState(Qt.WindowActive)
@@ -617,10 +656,8 @@ class HQMUtilsGUI(QWidget):
         row = self.table.selectionModel().currentIndex();
         row = self.proxy_model.mapToSource(row).row()
         self.model.remove_server(row)
-
-        
+       
     def add_server(self):
-        
         address = self.address_field.text()
         port = self.port_field.text()
         self.model.add_server(QHostAddress(address), int(port))

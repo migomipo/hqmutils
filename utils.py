@@ -14,6 +14,7 @@ master = (master_addr, master_port)
 def print_help(args=None):
     print("MigoMipo HQM Utils © John Eriksson 2017")
     print("Commands:")
+    print("  gui                  : Nice graphical interface")
     print("  info <ip> <port>     : Shows info about a specific server")
     print("  info public          : Shows info about all public servers")
     print("  state <ip> <port>    : Joins a server, prints information and leaves")

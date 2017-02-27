@@ -98,7 +98,7 @@ def parse_info_response(ret, br):
     br.read_unsigned(4)
     ret["teamsize"] = br.read_unsigned(4)
     name = br.read_bytes_aligned(32)
-    ret["name"] = string_strip_null(name).decode("iso-8859-1")
+    ret["name"] = string_strip_null(name).decode("ascii", "ignore")
     return ret
     
 def parse_server_list(data):
@@ -171,40 +171,44 @@ class HQMGameState:
         
         
 class HQMObjectState(dict):
-    pass
+    def __init__(self):
+        dict.__init__(self)
+        self.calculated = False
     
     def calculate_positions(self):
-        pos_x = convert_pos(self["pos_x_int"])
-        pos_y = convert_pos(self["pos_y_int"])
-        pos_z = convert_pos(self["pos_z_int"])
-        
-        self["pos"] = (pos_x, pos_y, pos_z)
-        
-        rot_a = convert_rot_vector(self["rot_a_int"], 31)
-        rot_b = convert_rot_vector(self["rot_b_int"], 31)
-        if rot_a is not None and rot_b is not None:
-           self["rot"] = Matrix3D.from_columns(rot_a.cross(rot_b).normal(), rot_a, rot_b)
-        else:
-           self["rot"] = None        
-        
-        if(self["type"]=="PLAYER"):
-                           
-            stick_x = convert_stick_pos(self["stick_x_int"], pos_x)
-            stick_y = convert_stick_pos(self["stick_y_int"], pos_y) 
-            stick_z = convert_stick_pos(self["stick_z_int"], pos_z)                
-                
-            obj["stick_pos"] = (stick_x, stick_y, stick_z)    
-                
-            stick_rot_a = convert_rot_vector(self["stick_rot_a_int"], 25)
-            stick_rot_b = convert_rot_vector(self["stick_rot_b_int"], 25)
-            if stick_rot_a is not None and stick_rot_b is not None:
-                self["stick_rot"] = Matrix3D.from_columns(
-                       stick_rot_a.cross(stick_rot_b).normal(), stick_rot_a, stick_rot_b)
-            else:
-                self["stick_rot"] = None                
+        if not self.calculated:
+            self.calculated = True
+            pos_x = convert_pos(self["pos_x_int"])
+            pos_y = convert_pos(self["pos_y_int"])
+            pos_z = convert_pos(self["pos_z_int"])
             
-            self["head_rot"] = convert_unknown_rot(self["head_rot_int"])
-            self["body_rot"] = convert_unknown_rot(self["body_rot_int"])        
+            self["pos"] = (pos_x, pos_y, pos_z)
+            
+            rot_a = convert_rot_vector(self["rot_a_int"], 31)
+            rot_b = convert_rot_vector(self["rot_b_int"], 31)
+            if rot_a is not None and rot_b is not None:
+               self["rot"] = Matrix3D.from_columns(rot_a.cross(rot_b).normal(), rot_a, rot_b)
+            else:
+               self["rot"] = None        
+            
+            if(self["type"]=="PLAYER"):
+                               
+                stick_x = convert_stick_pos(self["stick_x_int"], pos_x)
+                stick_y = convert_stick_pos(self["stick_y_int"], pos_y) 
+                stick_z = convert_stick_pos(self["stick_z_int"], pos_z)                
+                    
+                obj["stick_pos"] = (stick_x, stick_y, stick_z)    
+                    
+                stick_rot_a = convert_rot_vector(self["stick_rot_a_int"], 25)
+                stick_rot_b = convert_rot_vector(self["stick_rot_b_int"], 25)
+                if stick_rot_a is not None and stick_rot_b is not None:
+                    self["stick_rot"] = Matrix3D.from_columns(
+                           stick_rot_a.cross(stick_rot_b).normal(), stick_rot_a, stick_rot_b)
+                else:
+                    self["stick_rot"] = None                
+                
+                self["head_rot"] = convert_unknown_rot(self["head_rot_int"])
+                self["body_rot"] = convert_unknown_rot(self["body_rot_int"])        
 
 class HQMClientSession:
     def __init__(self, username, version):
@@ -222,7 +226,7 @@ class HQMClientSession:
     def get_message(self):
         bw = CSBitWriter()
         if self.state == "join":
-            byte_name = self.username.encode("iso-8859-1").ljust(32, b"\0")
+            byte_name = self.username.encode("ascii","ignore").ljust(32, b"\0")
             bw.write_bytes_aligned(header)
             bw.write_unsigned(8, CCMD_JOIN) 
             bw.write_unsigned(8, self.version)
@@ -246,7 +250,7 @@ class HQMClientSession:
                 self.chat_message_index = (self.chat_message_index+1) & 7 
                 bw.write_unsigned(1, 1)
                 bw.write_unsigned(3, self.chat_message_index)             
-                message = self.chat_messages.popleft().encode("iso-8859-1")
+                message = self.chat_messages.popleft().encode("ascii", "ignore")
                 message_len = min(255, len(message))
                 bw.write_unsigned(8, message_len)
                 bw.write_bytes_aligned(message[0:message_len])
@@ -386,7 +390,7 @@ class HQMClientSession:
             for i in range(31):
                 name.append(br.read_unsigned(7))
             name = bytes(name)
-            msg["name"] = string_strip_null(name).decode("iso-8859-1")
+            msg["name"] = string_strip_null(name).decode("ascii", "ignore")
         elif type==1: #Goal scored
             msg["type"] = "GOAL"
             msg["team"] = br.read_unsigned(2)
@@ -401,7 +405,7 @@ class HQMClientSession:
             for i in range(msg["size"]):
                 name.append(br.read_unsigned(7))
             name = bytes(name)
-            msg["message"] = string_strip_null(name).decode("iso-8859-1")
+            msg["message"] = string_strip_null(name).decode("ascii", "ignore")
         return msg
     
         
