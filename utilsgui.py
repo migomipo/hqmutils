@@ -99,23 +99,24 @@ class ServerListTableModel(QAbstractTableModel):
         if addr not in self.server_map:
         
             new_server = {"ip":ip, "port":port}
-            self.layoutAboutToBeChanged.emit()
+            self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers))   
             self.servers.append(new_server)
             self.server_map[addr] = new_server
-            self.layoutChanged.emit()
+            self.endInsertRows()
             
     def remove_server(self, index):
-        self.layoutAboutToBeChanged.emit()
+        
         server = self.servers[index]
+        self.beginRemoveRows(QModelIndex(), index, index) 
         del self.server_map[(server["ip"], server["port"])]
         del self.servers[index]
-        self.layoutChanged.emit()
+        self.endRemoveRows()
 
     def clear(self):
-        self.layoutAboutToBeChanged.emit()
+        self.beginResetModel()
         self.servers = []
         self.server_map = {}
-        self.layoutChanged.emit()
+        self.endResetModel()
             
     def add_public(self, state):
         self.use_public = state
@@ -208,9 +209,9 @@ class ServerUserListTableModel(QAbstractTableModel):
         self.you = state.you
         new_players = sorted(state.players.values(), key=lambda s: s["index"])
         if(len(new_players)!=len(self.players)):
-            self.layoutAboutToBeChanged.emit()
+            self.beginResetModel()
             self.players = new_players
-            self.layoutChanged.emit()
+            self.endResetModel()
         else:
             self.players = new_players
             self.dataChanged.emit(self.createIndex(0,0),self.createIndex(len(self.players),4))
