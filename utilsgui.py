@@ -459,6 +459,8 @@ class HQMServerGUI(QWidget):
         player_format.setFontWeight(QFont.Bold)       
         server_format = QTextCharFormat(player_format)
         server_format.setForeground(QBrush(QColor("magenta")))
+        goal_format = QTextCharFormat(player_format)
+        goal_format.setForeground(QBrush(QColor("green")))
         
         def get_team_format(team):
             team_format = QTextCharFormat()
@@ -517,7 +519,9 @@ class HQMServerGUI(QWidget):
             team = msg["team"]
             scoring = self.player_list.get(msg["scoring_player"])
             assisting = self.player_list.get(msg["assisting_player"])
+            cursor.setCharFormat(goal_format)
             cursor.insertText("GOAL! ")
+            cursor.setCharFormat(old_format)
             if scoring:
                 insert_player(cursor, scoring["name"], scoring["index"])
                 if assisting:
