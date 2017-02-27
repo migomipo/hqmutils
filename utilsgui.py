@@ -29,7 +29,9 @@ class ServerListTableModel(QAbstractTableModel):
     def __init__(self):
         QAbstractTableModel.__init__(self)
         self.socket = QUdpSocket()
+        self.socket.bind(QHostAddress.Any)
         self.socket.readyRead.connect(self._on_ready_read)
+        
         self.servers = []
         self.server_map = {}
         
@@ -84,9 +86,11 @@ class ServerListTableModel(QAbstractTableModel):
             millis = get_millis_truncated()
             message = hqm.make_info_request_cmessage(55, millis)
             self.socket.writeDatagram(message, address, port)
+ 
             
     def _on_public_timeout(self):
         self.socket.writeDatagram(hqm.server_list_message, master_addr, master_port)
+
         
     def add_server(self, ip, port):
         addr = (ip, port)
@@ -185,73 +189,7 @@ class ServerListTableModel(QAbstractTableModel):
             if name is not None:
                 return name          
         return QVariant() 
-        
-class ServerStateInfoTableModel(QAbstractTableModel):
-    def __init__(self, ip, port):
-        QAbstractTableModel.__init__(self)
-        self.ip = ip
-        self.port = port
-        self.gamestate = None
-        
-    def rowCount(self, parent):
-        return 6
-        
-    def columnCount(self, parent):
-        return 2
-        
-    def set_state(self, state):
-        self.gamestate = state
-        self.dataChanged.emit(self.createIndex(1,1),self.createIndex(self.rowCount(None),1))
-        
-
-    def data(self, index, role):
-        if not index.isValid(): 
-            return QVariant()             
-        elif role != Qt.DisplayRole: 
-            return QVariant() 
-        row = index.row()
-        col = index.column()
-        if row==0:
-            if col==0:
-                return "Address"
-            elif col==1:
-                return self.ip.toString()
-        elif row==1:
-            if col==0:
-                return "Port"
-            elif col==1:
-                return self.port
-        elif row==2:
-            if col==0:
-                return "Period"
-            elif col==1 and self.gamestate:
-                period = self.gamestate.period
-                if period == 0:
-                    period = "Warmup"
-                return period
-        elif row==3:
-            if col==0:
-                return "Time"
-            elif col==1 and self.gamestate:
-                time_left = self.gamestate.time
-                minutes = time_left//6000
-                seconds = (time_left - (minutes*6000)) // 100
-                return "{}:{:0>2}".format(minutes, seconds)
-        elif row==4:
-            if col==0:
-                return "Timeout"
-            elif col==1 and self.gamestate:
-                time_left = self.gamestate.timeout
-                minutes = time_left//6000
-                seconds = (time_left - (minutes*6000)) // 100
-                return "{}:{:0>2}".format(minutes, seconds)
-        elif row==5:
-            if col==0:
-                return "Score"
-            elif col==1 and self.gamestate:
-                return "{} - {}".format(self.gamestate.redscore, self.gamestate.bluescore)                
-        return QVariant() 
-        
+                
 class ServerUserListTableModel(QAbstractTableModel):
     def __init__(self):
         QAbstractTableModel.__init__(self)
