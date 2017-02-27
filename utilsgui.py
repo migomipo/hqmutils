@@ -10,6 +10,14 @@ from PyQt5.QtNetwork import *
 
 master_addr = QHostAddress("216.55.186.104")
 master_port = 27590
+
+old_format = QTextCharFormat()
+player_format = QTextCharFormat()
+player_format.setFontWeight(QFont.Bold)       
+server_format = QTextCharFormat(player_format)
+server_format.setForeground(QBrush(QColor("magenta")))
+goal_format = QTextCharFormat(player_format)
+goal_format.setForeground(QBrush(QColor("green")))
         
 def get_millis_truncated():
     return int(round(time.time() * 1000)) & 0xffffffff
@@ -449,19 +457,10 @@ class HQMServerGUI(QWidget):
 
 
                          
-    def insert_event(self, msg):
-    
+    def insert_event(self, msg):   
         cursor = self.event_list.textCursor()
         cursor.movePosition(QTextCursor.End)
-            
-        old_format = cursor.charFormat()
-        player_format = QTextCharFormat()
-        player_format.setFontWeight(QFont.Bold)       
-        server_format = QTextCharFormat(player_format)
-        server_format.setForeground(QBrush(QColor("magenta")))
-        goal_format = QTextCharFormat(player_format)
-        goal_format.setForeground(QBrush(QColor("green")))
-        
+              
         def get_team_format(team):
             team_format = QTextCharFormat()
             team_format.setFontWeight(QFont.Bold)
@@ -537,10 +536,14 @@ class HQMServerGUI(QWidget):
             
            
     def reset_log(self, gameID):
+        cursor = self.event_list.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.setCharFormat(server_format)
+        cursor.insertText("New game starting ({})\n".format(gameID))
+        cursor.setCharFormat(old_format)
         self.last_msg_pos = 0
         self.player_list = {}
         self.gameID = gameID 
-        self.event_list.clear()        
         
     def closeEvent(self, event):
         self.update_timer.stop()
