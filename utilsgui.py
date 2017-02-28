@@ -616,9 +616,24 @@ class HQMUtilsGUI(QWidget):
        
     def add_server(self):
         address = self.address_field.text()
-        port = self.port_field.text()
-        self.model.add_server(QHostAddress(address), int(port))
-        
+        port_ranges = self.port_field.text()
+        try:
+            ports = []
+            port_ranges = port_ranges.split(",")
+            for port_range in port_ranges:
+                partition = port_range.partition("-")  
+                start = int(partition[0])
+                if partition[1]!="":
+                    end = int(partition[2])
+                    for port in range(start, end+1):
+                        ports.append(port)
+                else:
+                    ports.append(start)
+            for port in ports:
+                self.model.add_server(QHostAddress(address), port)     
+        except ValueError as ex:
+            print(ex)
+
     def load_public_servers(self, state):
         self.model.add_public(state==2)
 
