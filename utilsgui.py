@@ -23,6 +23,12 @@ def get_millis_truncated():
     return int(round(time.time() * 1000)) & 0xffffffff
     
 class ServerListProxyTableModel(QSortFilterProxyModel):
+    def lessThan(self, index1, index2):        
+        if index1.column() == 0 and index2.column()==0:
+            d1 = self.sourceModel().data(index1, self.sortRole())
+            d2 = self.sourceModel().data(index2, self.sortRole())
+            return d1<d2
+        return QSortFilterProxyModel.lessThan(self, index1, index2)
     pass
 
 class ServerListTableModel(QAbstractTableModel):
@@ -48,7 +54,7 @@ class ServerListTableModel(QAbstractTableModel):
     def _on_ready_read(self):
         while self.socket.hasPendingDatagrams():
             
-            data,host,port= self.socket.readDatagram(self.socket.pendingDatagramSize())
+            data, host, port= self.socket.readDatagram(self.socket.pendingDatagramSize())
             host = QHostAddress(host.toIPv4Address())
             if host==master_addr and data.startswith(b"Hock!") and self.use_public:
                 addresses = hqm.parse_server_list(data)
@@ -61,7 +67,7 @@ class ServerListTableModel(QAbstractTableModel):
                         new_servers.append(new_server)
                         self.server_map[addr] = new_server
                 if len(new_servers)>0:
-                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers)-1)               
+                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers)-1)                               
                     self.servers.extend(new_servers)
                     self.endInsertRows()
             elif self.use_update:
@@ -70,15 +76,16 @@ class ServerListTableModel(QAbstractTableModel):
                 server = self.server_map.get((host, port))
                 if server is None:
                     return
-
+ 
+                #self.beginResetModel()
                 server["ping"] = get_millis_truncated()-msg["ping"]
                 server["players"] = msg["players"]
                 server["teamsize"] = msg["teamsize"]
                 server["version"] = msg["version"]
                 server["name"] = msg["name"]
                 index = self.servers.index(server)
-
-                self.dataChanged.emit(self.createIndex(index, 2),self.createIndex(index, 6))
+                self.dataChanged.emit(self.createIndex(index,0),self.createIndex(index,6))
+       
 
         
     def _on_timeout(self):
@@ -92,8 +99,7 @@ class ServerListTableModel(QAbstractTableModel):
             
     def _on_public_timeout(self):
         self.socket.writeDatagram(hqm.server_list_message, master_addr, master_port)
-
-        
+      
     def add_server(self, ip, port):
         addr = (ip, port)
         if addr not in self.server_map:
@@ -104,8 +110,7 @@ class ServerListTableModel(QAbstractTableModel):
             self.server_map[addr] = new_server
             self.endInsertRows()
             
-    def remove_server(self, index):
-        
+    def remove_server(self, index):   
         server = self.servers[index]
         self.beginRemoveRows(QModelIndex(), index, index) 
         del self.server_map[(server["ip"], server["port"])]
@@ -162,13 +167,16 @@ class ServerListTableModel(QAbstractTableModel):
     def data(self, index, role):
         if not index.isValid(): 
             return QVariant() 
-        elif role != Qt.DisplayRole: 
+        elif role != Qt.DisplayRole and role != Qt.UserRole: 
             return QVariant() 
         row = index.row()
         col = index.column()
         server = self.servers[row]
         if col==0:
-            return QVariant(server["ip"].toString())
+            if role == Qt.DisplayRole:
+                return server["ip"].toString()
+            else:
+                return server["ip"].toIPv4Address()
         elif col==1:
             return server["port"]
         elif col==2:
@@ -527,6 +535,7 @@ class HQMUtilsGUI(QWidget):
 
         self.model = ServerListTableModel()
         self.proxy_model = ServerListProxyTableModel()
+        self.proxy_model.setSortRole(Qt.UserRole)
         self.proxy_model.setSourceModel(self.model)
         self.proxy_model.setDynamicSortFilter(True)
         self.table.setModel(self.proxy_model)
