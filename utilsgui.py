@@ -537,7 +537,7 @@ class HQMUtilsGUI(QWidget):
         self.proxy_model = ServerListProxyTableModel()
         self.proxy_model.setSortRole(Qt.UserRole)
         self.proxy_model.setSourceModel(self.model)
-        self.proxy_model.setDynamicSortFilter(True)
+        self.proxy_model.setDynamicSortFilter(False)
         self.table.setModel(self.proxy_model)
         self.table.setSortingEnabled(True)
         self.table.setColumnWidth(0, 125)
