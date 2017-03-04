@@ -169,6 +169,15 @@ class HQMGameState:
         self.players = other.players.copy()
         self.events = other.events[:]
         
+    @property
+    def object_state(self):
+        cur_packet_mask = self.packet & 0xff
+        state = self.saved_states.get(cur_packet_mask)
+        if state is None:
+            state = {}
+        return state
+        
+        
         
 class HQMObjectState(dict):
     def __init__(self):
@@ -197,7 +206,7 @@ class HQMObjectState(dict):
                 stick_y = convert_stick_pos(self["stick_y_int"], pos_y) 
                 stick_z = convert_stick_pos(self["stick_z_int"], pos_z)                
                     
-                obj["stick_pos"] = (stick_x, stick_y, stick_z)    
+                self["stick_pos"] = (stick_x, stick_y, stick_z)    
                     
                 stick_rot_a = convert_rot_vector(self["stick_rot_a_int"], 25)
                 stick_rot_b = convert_rot_vector(self["stick_rot_b_int"], 25)
@@ -328,32 +337,33 @@ class HQMClientSession:
         
         obj = HQMObjectState()
         ingame = br.read_unsigned(1) == 1
-        obj["ingame"] = ingame
-        if ingame:
-            typenum = br.read_unsigned(2)
-            if typenum == 0:
-                obj["type"] = "PLAYER"
-            elif typenum == 1:
-                obj["type"] = "PUCK"
-            else:
-                obj["type"] = typenum
-                      
-            obj["pos_x_int"] = br.read_pos(17, old_obj.get("pos_x_int"))
-            obj["pos_y_int"] = br.read_pos(17, old_obj.get("pos_y_int"))
-            obj["pos_z_int"] = br.read_pos(17, old_obj.get("pos_z_int"))
-            obj["rot_a_int"] = br.read_pos(31, old_obj.get("rot_a_int"))
-            obj["rot_b_int"] = br.read_pos(31, old_obj.get("rot_b_int"))
+        if not ingame:
+            return
 
-            if(obj["type"]=="PLAYER"):
-                obj["stick_x_int"] = br.read_pos(13, old_obj.get("stick_x_int"))
-                obj["stick_y_int"] = br.read_pos(13, old_obj.get("stick_y_int"))
-                obj["stick_z_int"] = br.read_pos(13, old_obj.get("stick_z_int"))
-                      
-                obj["stick_rot_a_int"] = br.read_pos(25, old_obj.get("stick_rot_a_int"))     
-                obj["stick_rot_b_int"] = br.read_pos(25, old_obj.get("stick_rot_b_int"))  
-            
-                obj["head_rot_int"] = br.read_pos(16, old_obj.get("head_rot_int"))    
-                obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
+        typenum = br.read_unsigned(2)
+        if typenum == 0:
+            obj["type"] = "PLAYER"
+        elif typenum == 1:
+            obj["type"] = "PUCK"
+        else:
+            obj["type"] = typenum
+                  
+        obj["pos_x_int"] = br.read_pos(17, old_obj.get("pos_x_int"))
+        obj["pos_y_int"] = br.read_pos(17, old_obj.get("pos_y_int"))
+        obj["pos_z_int"] = br.read_pos(17, old_obj.get("pos_z_int"))
+        obj["rot_a_int"] = br.read_pos(31, old_obj.get("rot_a_int"))
+        obj["rot_b_int"] = br.read_pos(31, old_obj.get("rot_b_int"))
+
+        if(obj["type"]=="PLAYER"):
+            obj["stick_x_int"] = br.read_pos(13, old_obj.get("stick_x_int"))
+            obj["stick_y_int"] = br.read_pos(13, old_obj.get("stick_y_int"))
+            obj["stick_z_int"] = br.read_pos(13, old_obj.get("stick_z_int"))
+                  
+            obj["stick_rot_a_int"] = br.read_pos(25, old_obj.get("stick_rot_a_int"))     
+            obj["stick_rot_b_int"] = br.read_pos(25, old_obj.get("stick_rot_b_int"))  
+        
+            obj["head_rot_int"] = br.read_pos(16, old_obj.get("head_rot_int"))    
+            obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
       
         self.new_gamestate.saved_states[cur_packet][i] = obj;
    

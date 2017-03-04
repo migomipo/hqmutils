@@ -384,6 +384,12 @@ class HQMServerGUI(QWidget):
                 for msg in events:
                     hqm.update_player_list(self.player_list, msg)
                     self.insert_event(msg)
+        # To be continued.....
+        #objects = self.gamestate.object_state.items()
+        #for key, object in objects:           
+        #    object.calculate_positions()
+        #    print(object)
+        
                     
                     
     def update_info_label(self):
