@@ -80,9 +80,9 @@ try:
                 a2 = temp1
                 a3 = temp3
             elif c==1:
-                temp2 = normalize(a2+a3)
-                temp3 = normalize(a3+a1)        
-                a1 = temp3
+                temp1 = normalize(a1+a2)
+                temp2 = normalize(a2+a3)       
+                a1 = temp1
                 a3 = temp2
             elif c==2:
                 temp2 = normalize(a2+a3)
