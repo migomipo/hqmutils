@@ -42,52 +42,67 @@ def convert_unknown_rot(rot):
     return (rot-16384)/8192
     
     
-def convert_rot_vector(n, bits):
-    if n is None:
-        return None
-    assert(bits%2==1)
-    assert(bits>=5)
+try:
+    import numpy as np
     unitVectors = [
-        Vector3D( 0, -1,  0),
-        Vector3D(-1,  0,  0),
-        Vector3D( 0,  0, -1),
-        Vector3D( 1,  0,  0),
-        Vector3D( 0,  0,  1),
-        Vector3D( 0,  1,  0)
+        np.array(( 0, -1,  0), dtype=np.float32),
+        np.array((-1,  0,  0), dtype=np.float32),
+        np.array(( 0,  0, -1), dtype=np.float32),
+        np.array(( 1,  0,  0), dtype=np.float32),
+        np.array(( 0,  0,  1), dtype=np.float32),
+        np.array(( 0,  1,  0), dtype=np.float32)
     ]
+
     vChoice1 = [5,5,5,5,4,1,3,2]
     vChoice2 = [3,4,2,1,3,4,2,1]
     vChoice3 = [4,1,3,2,0,0,0,0]
+
+    def normalize(v):
+        norm=math.sqrt(np.dot(v,v))
+        if norm!=0: 
+           v/=norm   
+        return v
+
+    def convert_rot_vector(n, bits):
+        if n is None:
+            return None
+
+
+        lowest = n & 0x7
+        a1 = (unitVectors[vChoice1[lowest]])
+        a2 = (unitVectors[vChoice2[lowest]])
+        a3 = (unitVectors[vChoice3[lowest]])
+        for i in range(3, bits, 2):
+            c = (n >> i) & 3 # Two bits at a time
+            if c==0:
+                temp1 = normalize(a1+a2)
+                temp3 = normalize(a3+a1)
+                a2 = temp1
+                a3 = temp3
+            elif c==1:
+                temp2 = normalize(a2+a3)
+                temp3 = normalize(a3+a1)        
+                a1 = temp3
+                a3 = temp2
+            elif c==2:
+                temp2 = normalize(a2+a3)
+                temp3 = normalize(a3+a1)
+                a1 = temp3
+                a2 = temp2
+            elif c==3:
+                temp1 = normalize(a1+a2)
+                temp2 = normalize(a2+a3)
+                temp3 = normalize(a3+a1)
+                a1 = temp1
+                a2 = temp2
+                a3 = temp3
+        a1+=a2
+        a1+=a3
+        return normalize(a1)      
+except ImportError:
+    pass # No numpy
     
-    lowest = n & 0x7
-    a1 = unitVectors[vChoice1[lowest]]
-    a2 = unitVectors[vChoice2[lowest]]
-    a3 = unitVectors[vChoice3[lowest]]
-    for i in range(3, bits, 2):
-        c = (n >> i) & 3 # Two bits at a time
-        if c==0:
-            temp1 = (a1+a2).normal()
-            temp3 = (a3+a1).normal()
-            a2 = temp1
-            a3 = temp3
-        elif c==1:
-            temp2 = (a2+a3).normal()
-            temp3 = (a3+a1).normal()
-            a1 = temp3
-            a3 = temp2
-        elif c==2:
-            temp2 = (a2+a3).normal()
-            temp3 = (a3+a1).normal()
-            a1 = temp3
-            a2 = temp2
-        elif c==3:
-            temp1 = (a1+a2).normal()
-            temp2 = (a2+a3).normal()
-            temp3 = (a3+a1).normal()
-            a1 = temp1
-            a2 = temp2
-            a3 = temp3
-    return (a1+a2+a3).normal()        
+       
 
 
 def parse_from_server(msg):
@@ -195,19 +210,21 @@ class HQMObjectState(dict):
     
     def calculate_positions(self):
         if not self.calculated:
+            import numpy as np
             self.calculated = True
             pos_x = convert_pos(self["pos_x_int"])
             pos_y = convert_pos(self["pos_y_int"])
             pos_z = convert_pos(self["pos_z_int"])
             
-            self["pos"] = (pos_x, pos_y, pos_z)
+            self["pos"] = np.array((pos_x, pos_y, pos_z), dtype=np.float32)
             
-            rot_a = convert_rot_vector(self["rot_a_int"], 31)
-            rot_b = convert_rot_vector(self["rot_b_int"], 31)
-            if rot_a is not None and rot_b is not None:
-               self["rot"] = Matrix3D.from_columns(rot_a.cross(rot_b).normal(), rot_a, rot_b)
+            rot_2 = convert_rot_vector(self["rot_a_int"], 31)
+            rot_3 = convert_rot_vector(self["rot_b_int"], 31)
+            if rot_2 is not None and rot_3 is not None:
+                rot_1 = np.cross(rot_2, rot_3)
+                self["rot"] = np.column_stack((rot_1, rot_2, rot_3))
             else:
-               self["rot"] = None        
+                self["rot"] = None        
             
             if(self["type"]=="PLAYER"):
                                
@@ -215,13 +232,13 @@ class HQMObjectState(dict):
                 stick_y = convert_stick_pos(self["stick_y_int"], pos_y) 
                 stick_z = convert_stick_pos(self["stick_z_int"], pos_z)                
                     
-                self["stick_pos"] = (stick_x, stick_y, stick_z)    
+                self["stick_pos"] = np.array((stick_x, stick_y, stick_z), dtype=np.float32)    
                     
-                stick_rot_a = convert_rot_vector(self["stick_rot_a_int"], 25)
-                stick_rot_b = convert_rot_vector(self["stick_rot_b_int"], 25)
-                if stick_rot_a is not None and stick_rot_b is not None:
-                    self["stick_rot"] = Matrix3D.from_columns(
-                           stick_rot_a.cross(stick_rot_b).normal(), stick_rot_a, stick_rot_b)
+                stick_rot_2 = convert_rot_vector(self["stick_rot_a_int"], 25)
+                stick_rot_3 = convert_rot_vector(self["stick_rot_b_int"], 25)
+                if stick_rot_2 is not None and stick_rot_3 is not None:
+                    stick_rot_1 = np.cross(stick_rot_2, stick_rot_3)
+                    self["stick_rot"] = np.column_stack((stick_rot_1, stick_rot_2, stick_rot_3))
                 else:
                     self["stick_rot"] = None                
                 
