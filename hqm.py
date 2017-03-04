@@ -66,18 +66,27 @@ def convert_rot_vector(n, bits):
     for i in range(3, bits, 2):
         c = (n >> i) & 3 # Two bits at a time
         if c==0:
-            a2 = (a2+a1).normal()
-            a3 = (a3+a1).normal()
+            temp1 = (a1+a2).normal()
+            temp3 = (a3+a1).normal()
+            a2 = temp1
+            a3 = temp3
         elif c==1:
-            a1 = (a1+a2).normal()
-            a3 = (a3+a2).normal()
+            temp2 = (a2+a3).normal()
+            temp3 = (a3+a1).normal()
+            a1 = temp3
+            a3 = temp2
         elif c==2:
-            a1 = (a1+a3).normal()
-            a2 = (a2+a3).normal()
+            temp2 = (a2+a3).normal()
+            temp3 = (a3+a1).normal()
+            a1 = temp3
+            a2 = temp2
         elif c==3:
-            a1 = (a1+a2).normal()
-            a2 = (a2+a3).normal()
-            a3 = (a3+a1).normal()
+            temp1 = (a1+a2).normal()
+            temp2 = (a2+a3).normal()
+            temp3 = (a3+a1).normal()
+            a1 = temp1
+            a2 = temp2
+            a3 = temp3
     return (a1+a2+a3).normal()        
 
 
