@@ -6,8 +6,8 @@ from bitparse import CSBitReader
 from bitparse import CSBitWriter
 from collections import deque
 import struct
-from calc3d import *   
-
+import math
+ 
 header = b"Hock"
 server_list_message = b"Hock!"
 
@@ -44,24 +44,25 @@ def convert_unknown_rot(rot):
     
 try:
     import numpy as np
-    unitVectors = [
-        np.array(( 0, -1,  0), dtype=np.float32),
-        np.array((-1,  0,  0), dtype=np.float32),
-        np.array(( 0,  0, -1), dtype=np.float32),
-        np.array(( 1,  0,  0), dtype=np.float32),
-        np.array(( 0,  0,  1), dtype=np.float32),
-        np.array(( 0,  1,  0), dtype=np.float32)
-    ]
-
+    pi = math.pi
+    
+    sphericalUnitVectors = [
+        (pi/2, 3*pi/2),
+        (pi/2, pi),
+        (pi,  0),
+        (pi/2, 0),
+        (0, 0),
+        (pi/2, pi/2)
+    ]    
+    
     vChoice1 = [5,5,5,5,4,1,3,2]
     vChoice2 = [3,4,2,1,3,4,2,1]
     vChoice3 = [4,1,3,2,0,0,0,0]
 
-    def normalize(v):
-        norm=math.sqrt(np.dot(v,v))
-        if norm!=0: 
-           v/=norm   
-        return v
+    def sum_spherical(s1, s2):
+        s1a, s1b = s1
+        s2a, s2b = s2
+        return ((s1a+s2a)/2, (s1b+s2b)/2)
 
     def convert_rot_vector(n, bits):
         if n is None:
@@ -69,36 +70,38 @@ try:
 
 
         lowest = n & 0x7
-        a1 = (unitVectors[vChoice1[lowest]])
-        a2 = (unitVectors[vChoice2[lowest]])
-        a3 = (unitVectors[vChoice3[lowest]])
+        a1 = sphericalUnitVectors[vChoice1[lowest]]
+        a2 = sphericalUnitVectors[vChoice2[lowest]]
+        a3 = sphericalUnitVectors[vChoice3[lowest]]
         for i in range(3, bits, 2):
             c = (n >> i) & 3 # Two bits at a time
             if c==0:
-                temp1 = normalize(a1+a2)
-                temp3 = normalize(a3+a1)
-                a2 = temp1
-                a3 = temp3
+                a2 = sum_spherical(a2, a1)
+                a3 = sum_spherical(a3, a1)
             elif c==1:
-                temp1 = normalize(a1+a2)
-                temp2 = normalize(a2+a3)       
-                a1 = temp1
-                a3 = temp2
+                a1 = sum_spherical(a1, a2)
+                a3 = sum_spherical(a3, a2)
             elif c==2:
-                temp2 = normalize(a2+a3)
-                temp3 = normalize(a3+a1)
-                a1 = temp3
-                a2 = temp2
+                a2 = sum_spherical(a2, a3)
+                a1 = sum_spherical(a1, a3)
             elif c==3:
-                temp1 = normalize(a1+a2)
-                temp2 = normalize(a2+a3)
-                temp3 = normalize(a3+a1)
+                temp1 = sum_spherical(a1, a2)
+                temp2 = sum_spherical(a2, a3)
+                temp3 = sum_spherical(a3, a1)
                 a1 = temp1
                 a2 = temp2
                 a3 = temp3
-        a1+=a2
-        a1+=a3
-        return normalize(a1)      
+                
+                
+        theta, phi = sum_spherical(a1, sum_spherical(a2, a3))
+        sintheta = math.sin(theta)
+        costheta = math.cos(theta)
+        sinphi = math.sin(phi)
+        cosphi = math.cos(phi)
+        x = sintheta*cosphi
+        y = sintheta*sinphi
+        z = costheta
+        return np.array((x,y,z),dtype=np.float32, order='C')
 except ImportError:
     pass # No numpy
     
