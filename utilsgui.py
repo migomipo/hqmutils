@@ -75,7 +75,7 @@ class ServerListTableModel(QAbstractTableModel):
                         new_servers.append(new_server)
                         self.server_map[addr] = new_server
                 if len(new_servers)>0:
-                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers))
+                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers)-1)
                     self.servers.extend(new_servers)
                     self.endInsertRows()
             elif self.use_update:
