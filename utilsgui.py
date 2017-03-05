@@ -2,6 +2,8 @@
 import sys
 import time
 import hqm
+import math
+import itertools
 from PyQt5.QtWidgets import *
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
@@ -18,6 +20,12 @@ server_format = QTextCharFormat(player_format)
 server_format.setForeground(QBrush(QColor("magenta")))
 goal_format = QTextCharFormat(player_format)
 goal_format.setForeground(QBrush(QColor("green")))
+
+def pairwise(iterable):
+    "s -> (s0,s1), (s1,s2), (s2, s3), ..."
+    a, b = itertools.tee(iterable)
+    next(b, None)
+    return zip(a, b)
         
 def get_millis_truncated():
     return int(round(time.time() * 1000)) & 0xffffffff
@@ -67,7 +75,7 @@ class ServerListTableModel(QAbstractTableModel):
                         new_servers.append(new_server)
                         self.server_map[addr] = new_server
                 if len(new_servers)>0:
-                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers)-1)                               
+                    self.beginInsertRows(QModelIndex(), len(self.servers), len(self.servers)+len(new_servers))
                     self.servers.extend(new_servers)
                     self.endInsertRows()
             elif self.use_update:
@@ -275,7 +283,97 @@ class ServerUserListTableModel(QAbstractTableModel):
             elif col==4:
                 return "A"
         return QVariant()
+       
+triangle = QPolygonF([QPointF(0, -0.7), QPointF(-0.7, 0), QPointF(-0.7, 0.7), QPointF(0.7, 0.7),QPointF(0.7, 0)])
+red_net = [QPointF(13.5, 57), QPointF(13.5, 58), QPointF(16.5, 58), QPointF(16.5, 57)]
+
+
+blue_net = [QPointF(13.5, 4), QPointF(13.5, 3), QPointF(16.5, 3), QPointF(16.5, 4)]
+
+       
+class HQMMiniMap(QWidget):
+    def __init__(self):
+        QWidget.__init__(self)
+        self.gamestate = None
         
+    def set_state(self, gamestate):
+        self.gamestate = gamestate
+        self.update()
+        #
+        #for object in objects:              
+        #    object.calculate_positions()
+        #    pos = object["pos"]
+        #    type = object["type"]
+        #    print(type + ": " + str(pos))
+ 
+    def get_player(self, i):
+        for player_i, player in self.gamestate.players.items():
+            if player["obj"]==i:
+                return player
+        return None 
+        
+    def paintEvent(self, event):     
+        scale = min(self.width()/32, self.height()/64)
+        
+        painter = QPainter()
+        painter.begin(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.translate(4,4)
+        painter.scale(scale, scale)
+  
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255,255,255))      
+        painter.drawRoundedRect(0,0,30,61, 8.5, 8.5) 
+        
+        netpen = QPen()
+        netpen.setColor(QColor(128,0,0))
+        netpen.setWidth(0.5)
+        painter.setPen(netpen)            
+        for a, b in pairwise(red_net):
+            painter.drawLine(a, b)     
+        netpen.setColor(QColor(0,0,128))
+        netpen.setWidth(0.5)
+        painter.setPen(netpen)
+        for a, b in pairwise(blue_net):
+            painter.drawLine(a, b)
+            
+        painter.setPen(Qt.NoPen)
+        if not self.gamestate:
+            painter.end()
+            return
+        objects = self.gamestate.object_state
+        for i, object in objects.items():
+            object.calculate_positions()
+            pos = object["pos"]
+            type = object["type"]
+            if type=="PUCK":             
+                puck = QRectF(-0.3, -0.3, 0.6, 0.6)
+                painter.save()
+                painter.translate(pos[0], pos[2])
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(0,0,0))  
+                painter.drawEllipse(puck)
+                painter.restore()
+            elif type=="PLAYER":
+                
+                player = self.get_player(i)
+                if player is None or player["team"]==-1:
+                    continue
+                team = player["team"]
+                rot = object["rot"]
+
+                painter.save()
+                painter.translate(pos[0], pos[2])
+                painter.setPen(Qt.NoPen)
+                if team == 0:                   
+                    painter.setBrush(QColor(255,0,0))  
+                elif team == 1:
+                    painter.setBrush(QColor(0,0,255))  
+                transform = QTransform(rot[0][0], -rot[0][2], -rot[2][0], rot[2][2], 0, 0)
+                painter.setTransform(transform, True)
+                painter.drawConvexPolygon(triangle)
+                painter.restore()
+        painter.end()
         
 class HQMServerGUI(QWidget):
     closedServerDialog = pyqtSignal(QHostAddress, int)
@@ -347,18 +445,21 @@ class HQMServerGUI(QWidget):
         chat_settings.addStretch(1)
         chat_settings.addWidget(self.chat_hide)
         chat_settings.addWidget(self.chat_button)
-
         
-        main_layout.addWidget(self.event_list, 0, 0, 2, 1)
-        main_layout.addLayout(self.info_table, 0, 1)
-        main_layout.addWidget(self.user_table, 1, 1)
-        main_layout.addWidget(self.chat_field, 2, 0)
-        main_layout.addLayout(chat_settings, 3, 0)
-
-        main_layout.setColumnStretch(0,2)
-        main_layout.setColumnMinimumWidth(1,300)
+        self.minimap = HQMMiniMap()
         
-        self.resize(800, 600)
+        main_layout.addWidget(self.event_list, 0, 1, 2, 1)
+        main_layout.addLayout(self.info_table, 0, 2)
+        main_layout.addWidget(self.user_table, 1, 2)
+        main_layout.addWidget(self.chat_field, 2, 1)
+        main_layout.addLayout(chat_settings, 3, 1)
+        main_layout.addWidget(self.minimap, 0, 0, 3, 1)
+
+        main_layout.setColumnStretch(1,2)
+        main_layout.setColumnMinimumWidth(2,300)
+        main_layout.setColumnMinimumWidth(0,200)
+        
+        self.resize(900, 600)
         self.setLayout(main_layout)
         
         self.update_timer = QTimer()
@@ -374,8 +475,7 @@ class HQMServerGUI(QWidget):
         while self.socket.hasPendingDatagrams():            
             data = self.socket.read(8192)
             self.gamestate = self.session.parse_message(data)
-            self.update_info_label()
-            self.user_table_model.set_state(self.gamestate)
+
             if self.gameID != self.gamestate.id:  
                 self.reset_log(self.gamestate.id)
             if(self.gamestate.msg_pos>self.last_msg_pos):
@@ -384,12 +484,12 @@ class HQMServerGUI(QWidget):
                 for msg in events:
                     hqm.update_player_list(self.player_list, msg)
                     self.insert_event(msg)
+                 
         # To be continued.....
-        #objects = self.gamestate.object_state.items()
-        #for key, object in objects:           
-        #    object.calculate_positions()
-        #    print(object)
-        
+        self.update_info_label()
+        self.user_table_model.set_state(self.gamestate)
+        self.minimap.set_state(self.gamestate)
+ 
                     
                     
     def update_info_label(self):
@@ -444,8 +544,6 @@ class HQMServerGUI(QWidget):
                 cursor.insertText("the blue team")
             cursor.setCharFormat(old_format)                    
             
-
-
         if msg["type"]=="JOIN" or msg["type"]=="EXIT":
             name = msg["name"]
             i = msg["player"]
