@@ -1,0 +1,8 @@
+stick_angle 32-bit float        -1.0 (clockwise) to 1.0 (counter-clockwise), .25 increments
+move_lr     32-bit float        -1.0 (left), 1.0 (right), 0.0
+move_fwbw   32-bit float        -1.0 (backwards), 1.0 (forwards), 0.0
+stick_x     32-bit float        -pi/2 (left) to pi/2 (right)
+stick_y     32-bit float        -0.98 (up) to 0.39 (down)
+head_rot    32-bit float        -2.74 (left) to 2.74 (right)
+body_rot    32-bit float        -pi/2 (backwards) to pi/2 (forwards)
+keys        32 bits             0x1=jump, 0x2=crouch, 0x4=join red, 0x8=join blue, 0x10=shift, 0x20=spectate
