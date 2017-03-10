@@ -244,7 +244,14 @@ class HQMObjectState(dict):
                     self["stick_rot"] = None                
                 
                 self["head_rot"] = convert_unknown_rot(self["head_rot_int"])
-                self["body_rot"] = convert_unknown_rot(self["body_rot_int"])        
+                self["body_rot"] = convert_unknown_rot(self["body_rot_int"])   
+
+def bitmask_set(num, mask, val):
+    if val:
+        return val | mask
+    else:
+        return val & ~mask
+        
 
 class HQMClientSession:
     def __init__(self, username, version):
@@ -255,10 +262,52 @@ class HQMClientSession:
         self.last_message_num = None
         self.chat_messages = deque()
         self.chat_message_index = 0
-        
+        self.stick_angle = 0
+        self.move_lr = 0
+        self.move_fwbw = 0
+        self.stick_x = 0
+        self.stick_y = 0
+        self.head_rot = 0
+        self.body_rot = 0
+        self.keys = 0
+             
     def add_chat(self, str):
         self.chat_messages.append(str)
         
+    @property
+    def jump(self):
+        return self.keys & 0x1 > 0
+        
+    @jump.setter
+    def jump(self, value):
+        self.keys = bitmask_set(self.keys, 0x01, value)
+        
+    @property
+    def crouch(self):
+        return self.keys & 0x2 > 0
+        
+    @crouch.setter
+    def crouch(self, value):
+        self.keys = bitmask_set(self.keys, 0x02, value)
+        
+    @property
+    def shift(self):
+        return self.keys & 0x10 > 0
+        
+    @shift.setter
+    def shift(self, value):
+        self.keys = bitmask_set(self.keys, 0x10, value)
+        
+    def join_team(self, team):
+        self.keys = bitmask_set(self.keys, 0x2c, False) # Reset all team bits
+        # join_team(None) can be used to reset all join keys
+        if team == -1: #Spectate
+            self.keys = bitmask_set(self.keys, 0x20, True)
+        elif  team == 0: #Red team
+            self.keys = bitmask_set(self.keys, 0x4, True)            
+        elif  team == -1: #Blue team
+            self.keys = bitmask_set(self.keys, 0x8, True)    
+    
     def get_message(self):
         bw = CSBitWriter()
         if self.state == "join":
@@ -271,15 +320,15 @@ class HQMClientSession:
             bw.write_bytes_aligned(header)
             bw.write_unsigned(8, CCMD_UPDATE) 
             bw.write_unsigned_aligned(32, self.gamestate.id)
-            bw.write_sp_float_aligned(0) # Stick angle
-            bw.write_sp_float_aligned(0) # Movement X, +/- 1.0 or 0.0
+            bw.write_sp_float_aligned(self.stick_angle) 
+            bw.write_sp_float_aligned(self.move_lr) 
             bw.write_sp_float_aligned(0) # ????
-            bw.write_sp_float_aligned(0) # Movement Y, +/- 1.0 or 0.0
-            bw.write_sp_float_aligned(0) # Stick X
-            bw.write_sp_float_aligned(0) # Stick Y
-            bw.write_sp_float_aligned(0) # Head rotation
-            bw.write_sp_float_aligned(0) # Body rotation
-            bw.write_unsigned_aligned(32, 0) # Input keys, such as jump, crouch, join team
+            bw.write_sp_float_aligned(self.move_fwbw) 
+            bw.write_sp_float_aligned(self.stick_x) 
+            bw.write_sp_float_aligned(self.stick_y) 
+            bw.write_sp_float_aligned(self.head_rot) 
+            bw.write_sp_float_aligned(self.body_rot)                            
+            bw.write_unsigned_aligned(32, self.keys) 
             bw.write_unsigned_aligned(32, self.gamestate.packet) # Last read packet
             bw.write_unsigned_aligned(16, self.gamestate.msg_pos) # Last received message
             if len(self.chat_messages) != 0:

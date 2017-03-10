@@ -286,8 +286,6 @@ class ServerUserListTableModel(QAbstractTableModel):
        
 triangle = QPolygonF([QPointF(0, -0.7), QPointF(-0.7, 0), QPointF(-0.7, 0.7), QPointF(0.7, 0.7),QPointF(0.7, 0)])
 red_net = [QPointF(13.5, 57), QPointF(13.5, 58), QPointF(16.5, 58), QPointF(16.5, 57)]
-
-
 blue_net = [QPointF(13.5, 4), QPointF(13.5, 3), QPointF(16.5, 3), QPointF(16.5, 4)]
 
        
@@ -369,7 +367,7 @@ class HQMMiniMap(QWidget):
                     painter.setBrush(QColor(255,0,0))  
                 elif team == 1:
                     painter.setBrush(QColor(0,0,255))  
-                transform = QTransform(rot[0][0], -rot[0][2], -rot[2][0], rot[2][2], 0, 0)
+                transform = QTransform(rot[2][2], rot[2][0], rot[0][2], rot[0][0], 0, 0)
                 painter.setTransform(transform, True)
                 painter.drawConvexPolygon(triangle)
                 painter.restore()
