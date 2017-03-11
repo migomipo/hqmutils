@@ -152,14 +152,17 @@ def make_info_request_cmessage(version, ping):
     
 def update_player_list(list, msg):
     if msg["type"] == "JOIN":
-        player_obj = list.get(msg["player"], {})
+        old_player_obj = list.get(msg["player"])
+        player_obj = {}
         player_obj["team"] = msg["team"]
         player_obj["name"] = msg["name"]
         player_obj["obj"] = msg["offset"]
         player_obj["index"] = msg["player"]
-        if "goal" not in player_obj:
+        if old_player_obj:        
+            player_obj["goal"] = old_player_obj["goal"]
+            player_obj["assist"] = old_player_obj["assist"]
+        else:
             player_obj["goal"] = 0
-        if "assist" not in player_obj:
             player_obj["assist"] = 0
         list[msg["player"]] = player_obj
     elif msg["type"] == "EXIT":
@@ -168,9 +171,13 @@ def update_player_list(list, msg):
         scoring = list.get(msg["scoring_player"])
         assisting = list.get(msg["assisting_player"])
         if scoring:
+            scoring = scoring.copy()
             scoring["goal"]+=1
+            list[msg["scoring_player"]] = scoring
         if assisting:
+            assisting = assisting.copy()
             assisting["assist"]+=1
+            list[msg["assisting_player"]] = scoring
     
 class HQMGameState:
     def __init__(self, id):
@@ -441,6 +448,7 @@ class HQMClientSession:
             obj["head_rot_int"] = br.read_pos(16, old_obj.get("head_rot_int"))    
             obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
       
+        obj["i"] = i
         self.new_gamestate.saved_states[cur_packet][i] = obj;
    
     def parse_messages(self, br):
