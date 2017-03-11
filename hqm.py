@@ -177,7 +177,7 @@ def update_player_list(list, msg):
         if assisting:
             assisting = assisting.copy()
             assisting["assist"]+=1
-            list[msg["assisting_player"]] = scoring
+            list[msg["assisting_player"]] = assisting
     
 class HQMGameState:
     def __init__(self, id):
@@ -192,24 +192,16 @@ class HQMGameState:
         self.time = 0
         self.timeout = 0
         self.you = None
-        self.saved_states = {}
+        self.objects = {}
         self.players = {}
         self.events = []
         
     def copy_state(self, other):
-        self.saved_states = other.saved_states.copy()
-        self.players = other.players.copy()
-        self.events = other.events[:]
+        if other:
+            self.players = other.players.copy()
+            self.events = other.events[:]
         
-    @property
-    def object_state(self):
-        cur_packet_mask = self.packet & 0xff
-        state = self.saved_states.get(cur_packet_mask)
-        if state is None:
-            state = {}
-        return state
-        
-        
+
         
 class HQMObjectState(dict):
     def __init__(self):
@@ -264,11 +256,12 @@ class HQMClientSession:
     def __init__(self, username, version):
         self.username = username
         self.version = version
-        self.state = "join"
         self.gamestate = None
+        self.last_game_id = None
         self.last_message_num = None
         self.chat_messages = deque()
         self.chat_message_index = 0
+        self.saved_states = {}
         self.stick_angle = 0
         self.move_lr = 0
         self.move_fwbw = 0
@@ -317,7 +310,7 @@ class HQMClientSession:
     
     def get_message(self):
         bw = CSBitWriter()
-        if self.state == "join":
+        if not self.last_game_id:
             byte_name = self.username.encode("ascii","ignore").ljust(32, b"\0")
             bw.write_bytes_aligned(header)
             bw.write_unsigned(8, CCMD_JOIN) 
@@ -326,7 +319,7 @@ class HQMClientSession:
         elif self.state == "ingame":
             bw.write_bytes_aligned(header)
             bw.write_unsigned(8, CCMD_UPDATE) 
-            bw.write_unsigned_aligned(32, self.gamestate.id)
+            bw.write_unsigned_aligned(32, self.last_game_id)
             bw.write_sp_float_aligned(self.stick_angle) 
             bw.write_sp_float_aligned(self.move_lr) 
             bw.write_sp_float_aligned(0) # ????
@@ -336,8 +329,12 @@ class HQMClientSession:
             bw.write_sp_float_aligned(self.head_rot) 
             bw.write_sp_float_aligned(self.body_rot)                            
             bw.write_unsigned_aligned(32, self.keys) 
-            bw.write_unsigned_aligned(32, self.gamestate.packet) # Last read packet
-            bw.write_unsigned_aligned(16, self.gamestate.msg_pos) # Last received message
+            if self.gamestate:
+                bw.write_unsigned_aligned(32, self.gamestate.packet) # Last read packet
+                bw.write_unsigned_aligned(16, self.gamestate.msg_pos) # Last received message
+            else:
+                bw.write_unsigned_aligned(32, -1) 
+                bw.write_unsigned_aligned(16, 0)
             if len(self.chat_messages) != 0:
                 self.chat_message_index = (self.chat_message_index+1) & 7 
                 bw.write_unsigned(1, 1)
@@ -365,13 +362,10 @@ class HQMClientSession:
             gameID = br.read_unsigned_aligned(32)
             self.state = "ingame"
             if self.gamestate is None or self.gamestate.id != gameID:
-                self.gamestate = HQMGameState(gameID)
+                self.last_game_id = gameID
+                self.gamestate = None
         elif type == SCMD_GAME_UPDATE:
-            if self.state == "join":
-                self.state = "ingame"
-                self.gamestate = HQMGameState()
-            self.parse_game_update(br)
-            
+            self.parse_game_update(br)          
         else:
             # Unknown type
             return None
@@ -379,11 +373,12 @@ class HQMClientSession:
             
     def parse_game_update(self, br):
         gameID = br.read_unsigned_aligned(32)
-        if gameID != self.gamestate.id:
+        if gameID != self.last_game_id:
             return
         simstep = br.read_unsigned_aligned(32)
-        if simstep<self.gamestate.simstep and self.gamestate.simstep-simstep<100:
-            return
+        if self.gamestate:
+            if simstep<self.gamestate.simstep and self.gamestate.simstep-simstep<100:
+                return
         self.new_gamestate = HQMGameState(gameID)
         self.new_gamestate.copy_state(self.gamestate)
         self.new_gamestate.simstep = simstep
@@ -404,19 +399,17 @@ class HQMClientSession:
         old_packet = br.read_unsigned_aligned(32)
         cur_packet_mask = cur_packet & 0xff
         old_packet_mask = old_packet & 0xff
-        self.new_gamestate.saved_states[cur_packet_mask] = {}
+
         for i in range(32):
-            self.parse_object(br, i, cur_packet_mask, old_packet_mask)
+            self.parse_object(br, i, old_packet_mask)
+        self.saved_states[cur_packet_mask] = self.new_gamestate.objects
         self.new_gamestate.packet = cur_packet
         
-    def parse_object(self, br, i, cur_packet, old_packet):
-           
-        if old_packet not in self.gamestate.saved_states:
-            old_obj = HQMObjectState()
-        elif i not in self.gamestate.saved_states[old_packet]:
-            old_obj = HQMObjectState()
+    def parse_object(self, br, i, old_packet):        
+        if old_packet not in self.saved_states or i not in self.saved_states[old_packet]:
+            old_obj = {}
         else:
-            old_obj = self.gamestate.saved_states[old_packet][i]    
+            old_obj = self.saved_states[old_packet][i]    
         
         obj = HQMObjectState()
         ingame = br.read_unsigned(1) == 1
@@ -449,22 +442,20 @@ class HQMClientSession:
             obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
       
         obj["i"] = i
-        self.new_gamestate.saved_states[cur_packet][i] = obj;
+        self.new_gamestate.objects[i] = obj;
    
     def parse_messages(self, br):
         message_num = br.read_unsigned(4)
         self.last_message_num = message_num
-        msg_pos     = br.read_unsigned(16)  
-        for i in range(msg_pos, msg_pos+message_num):
-    
+        old_msg_pos = self.gamestate.msg_pos if self.gamestate else 0
+        msg_pos     = br.read_unsigned(16) 
+        for i in range(msg_pos, msg_pos+message_num): 
             msg = self.parse_state_message(br)
-
-            if i < self.gamestate.msg_pos:
-                continue
-            
+            if i < old_msg_pos:
+                continue          
             update_player_list(self.new_gamestate.players, msg)
             self.new_gamestate.events.append(msg)
-        self.new_gamestate.msg_pos = max(self.gamestate.msg_pos, msg_pos+message_num)
+        self.new_gamestate.msg_pos = max(old_msg_pos, msg_pos+message_num)
 
         
     def parse_state_message(self, br):

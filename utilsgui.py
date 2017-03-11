@@ -339,7 +339,7 @@ class HQMMiniMap(QWidget):
         if not self.gamestate:
             painter.end()
             return
-        objects = self.gamestate.object_state
+        objects = self.gamestate.objects
         for i, object in objects.items():
             object.calculate_positions()
             pos = object["pos"]
@@ -473,9 +473,10 @@ class HQMServerGUI(QWidget):
         while self.socket.hasPendingDatagrams():            
             data = self.socket.read(8192)
             self.gamestate = self.session.parse_message(data)
-
-            if self.gameID != self.gamestate.id:  
-                self.reset_log(self.gamestate.id)
+            if not self.gamestate:
+                return
+            if self.gameID != self.session.last_game_id:  
+                self.reset_log(self.session.last_game_id)
             if(self.gamestate.msg_pos>self.last_msg_pos):
                 events = self.gamestate.events[self.last_msg_pos:self.gamestate.msg_pos]
                 self.last_msg_pos = self.gamestate.msg_pos
