@@ -84,8 +84,7 @@ class TestBot(HQMBot):
         #   stick_rot  : The stick rotation, a numpy 3x3 rotation matrix
         #   head_rot   : Head rotation, left (-)/right (+), a float with rotation in radians
         #   body_rot   : Body rotation, backwards (-)/forwards (+), a float with rotation in radians
-        
-        
+             
         pucks = []
         teammates = []
         opponents = []
@@ -122,11 +121,4 @@ class TestBot(HQMBot):
         #session.shift = True      # Shift key        
         if gamestate.simstep%2000==500:
             session.add_chat("MigoBot")
-        
-
-
-        
-        
-        
-              
-              
+           
