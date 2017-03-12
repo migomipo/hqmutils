@@ -1,28 +1,29 @@
 import hqm
 import socket
 
-from twisted.internet.protocol import DatagramProtocol
-from twisted.internet import reactor
-from twisted.internet import task
 
-class HQMBot(DatagramProtocol):
-    def __init__(self, host, port, team, name):
+class HQMBot():
+    def __init__(self, host, port, team, name):  
         self.team = team
         self.host = host
         self.port = port
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.session = hqm.HQMClientSession(name, 55)
         self.syncing = True
                
     def run(self):
-        reactor.listenUDP(0, self)
-        reactor.run()
+        try:
+            while True:
+                send = self.session.get_message()
+                self.socket.sendto(send, (self.host, self.port))
+                data = self.socket.recv(8192) 
+                self.dataReceived(data)
+        except KeyboardInterrupt:
+            send = self.session.get_exit_message()
+            self.socket.sendto(send, (self.host, self.port))
+
         
-    def startProtocol(self):
-        self.transport.connect(self.host, self.port)
-        send = self.session.get_message()
-        self.transport.write(send)
-        
-    def datagramReceived(self, data, addr):
+    def dataReceived(self, data):
         self.session.parse_message(data)
         if self.session.last_message_num == 0:
             self.syncing = False
@@ -39,9 +40,7 @@ class HQMBot(DatagramProtocol):
                 else:
                     self.session.join_team(None)                              
                 self.action() #Let's do stuff
-                
-        send = self.session.get_message()
-        self.transport.write(send)
+               
         
     def spectate(self):
         pass
