@@ -75,11 +75,11 @@ class TestBot(HQMBot):
         # For player objects, you need the player list to determine which object belongs to which player.
         # Each object is a dictonary. You need to run object.calculate_positions()
         # for each object to calculate some useful position data.
-        # Both players and pucks have these keys:
+        # Both players and pucks have these keys after calculate_positions():
         #   type       : Identifies the type, either the string PLAYER or the string PUCK
         #   pos        : The object position, a numpy array with 3 elements.
         #   rot        : The object rotation, a numpy 3x3 rotation matrix
-        # Players object also have:
+        # Player objects also these keys after calculate_positions():
         #   stick_pos  : The stick position, a numpy array with 3 elements
         #   stick_rot  : The stick rotation, a numpy 3x3 rotation matrix
         #   head_rot   : Head rotation, left (-)/right (+), a float with rotation in radians
