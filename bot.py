@@ -113,6 +113,8 @@ class TestBot(HQMBot):
         session.move_fwbw = 1.0    # Forwards/Backwards, normal values are -1.0 (backwards), 0 or 1.0 (forwards)
         #session.stick_x           # Stick left/right rotation, normal values are from -pi/2 (left) to pi/2 (right)
         #session.stick_y           # Stick up/down rotation, normal values are -0.98 (up) to 0.39 (down)
+        #session.stick_angle       # Stick angle, normal values are -1 (clockwise) to 1 (counter-clockwise),
+                                   # The standard client changes the angle in steps of .25 when the mouse wheel is used
         #session.head_rot          # Head rotation, normal values are -2.74 (left) to 2.74 (right)
         #session.body_rot          # Body rotation, normal values are -pi/2 (backwards) to pi/2 (forwards)
         #session.jump = True       # Jump key
