@@ -7,7 +7,7 @@ import socket
 import hqm
 import time
 
-master_addr = "216.55.186.104"
+master_addr = "216.55.185.95"
 master_port = 27590
 master = (master_addr, master_port)
 

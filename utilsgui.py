@@ -10,7 +10,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtNetwork import *
 
 
-master_addr = QHostAddress("216.55.186.104")
+master_addr = QHostAddress("216.55.185.95")
 master_port = 27590
 
 old_format = QTextCharFormat()
