@@ -379,33 +379,32 @@ class HQMClientSession:
         if self.gamestate:
             if simstep<self.gamestate.simstep and self.gamestate.simstep-simstep<100:
                 return
-        self.new_gamestate = HQMGameState(gameID)
-        self.new_gamestate.copy_state(self.gamestate)
-        self.new_gamestate.simstep = simstep
-        self.new_gamestate.gameover = br.read_unsigned(1)
-        self.new_gamestate.redscore = br.read_unsigned(8)
-        self.new_gamestate.bluescore = br.read_unsigned(8)
-        self.new_gamestate.time = br.read_unsigned(16)
-        self.new_gamestate.timeout = br.read_unsigned(16)
-        self.new_gamestate.period = br.read_unsigned(8)
-        self.new_gamestate.you = br.read_unsigned(8)
-        self.parse_objects(br)
-        self.parse_messages(br)
-        self.gamestate = self.new_gamestate
+        new_gamestate = HQMGameState(gameID)
+        new_gamestate.copy_state(self.gamestate)
+        new_gamestate.simstep = simstep
+        new_gamestate.gameover = br.read_unsigned(1)
+        new_gamestate.redscore = br.read_unsigned(8)
+        new_gamestate.bluescore = br.read_unsigned(8)
+        new_gamestate.time = br.read_unsigned(16)
+        new_gamestate.timeout = br.read_unsigned(16)
+        new_gamestate.period = br.read_unsigned(8)
+        new_gamestate.you = br.read_unsigned(8)
+        self.parse_objects(br, new_gamestate)
+        self.parse_messages(br, new_gamestate)
+        self.gamestate = new_gamestate
 
-        
-    def parse_objects(self, br):
+    def parse_objects(self, br, new_gamestate):
         cur_packet = br.read_unsigned_aligned(32)
         old_packet = br.read_unsigned_aligned(32)
         cur_packet_mask = cur_packet & 0xff
         old_packet_mask = old_packet & 0xff
 
         for i in range(32):
-            self.parse_object(br, i, old_packet_mask)
-        self.saved_states[cur_packet_mask] = self.new_gamestate.objects
-        self.new_gamestate.packet = cur_packet
+            self.parse_object(br, i, old_packet_mask, new_gamestate)
+        self.saved_states[cur_packet_mask] = new_gamestate.objects
+        new_gamestate.packet = cur_packet
         
-    def parse_object(self, br, i, old_packet):        
+    def parse_object(self, br, i, old_packet, new_gamestate):        
         if old_packet not in self.saved_states or i not in self.saved_states[old_packet]:
             old_obj = {}
         else:
@@ -442,9 +441,9 @@ class HQMClientSession:
             obj["body_rot_int"] = br.read_pos(16, old_obj.get("body_rot_int"))  
       
         obj["i"] = i
-        self.new_gamestate.objects[i] = obj;
+        new_gamestate.objects[i] = obj;
    
-    def parse_messages(self, br):
+    def parse_messages(self, br, new_gamestate):
         message_num = br.read_unsigned(4)
         self.last_message_num = message_num
         old_msg_pos = self.gamestate.msg_pos if self.gamestate else 0
@@ -453,10 +452,9 @@ class HQMClientSession:
             msg = self.parse_state_message(br)
             if i < old_msg_pos:
                 continue          
-            update_player_list(self.new_gamestate.players, msg)
-            self.new_gamestate.events.append(msg)
-        self.new_gamestate.msg_pos = max(old_msg_pos, msg_pos+message_num)
-
+            update_player_list(new_gamestate.players, msg)
+            new_gamestate.events.append(msg)
+        new_gamestate.msg_pos = max(old_msg_pos, msg_pos+message_num)
         
     def parse_state_message(self, br):
         msg = {}

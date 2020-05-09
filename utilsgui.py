@@ -284,7 +284,7 @@ class ServerUserListTableModel(QAbstractTableModel):
                 return "A"
         return QVariant()
        
-triangle = QPolygonF([QPointF(0, -0.7), QPointF(-0.7, 0), QPointF(-0.7, 0.7), QPointF(0.7, 0.7),QPointF(0.7, 0)])
+triangle = QPolygonF([QPointF(0, -0.4), QPointF(-0.7, 0), QPointF(-0.7, 0.4), QPointF(0.7, 0.4),QPointF(0.7, 0)])
 red_net = [QPointF(13.5, 57), QPointF(13.5, 58), QPointF(16.5, 58), QPointF(16.5, 57)]
 blue_net = [QPointF(13.5, 4), QPointF(13.5, 3), QPointF(16.5, 3), QPointF(16.5, 4)]
 
@@ -362,28 +362,42 @@ class HQMMiniMap(QWidget):
                     continue
                 index = str(player["index"])
                 team = player["team"]
-                rot = object["rot"]
-
-                painter.save()
-                painter.translate(pos[0], pos[2])
                 
                 if team == 0:     
                     c = QColor(255,0,0)       
                 elif team == 1:
                     c = QColor(0,0,255)
-                    
+                
+                painter.save()
+                painter.translate(pos[0], pos[2])
                 fontpen = QPen()
                 fontpen.setColor(c)
                 painter.setPen(fontpen)
                 font = QFont()
                 font.setPointSizeF (1.5)
                 painter.setFont(font)
-                painter.drawText (QRect (1, -1.0, 3, 2), Qt.AlignVCenter | Qt.AlignLeft, index)
+                painter.drawText (QRectF (1, -1.0, 3, 2), Qt.AlignVCenter | Qt.AlignLeft, index)
+                painter.restore ()
+                
+                painter.save()
+                painter.translate(pos[0], pos[2])
+                rot = object["rot"]
                 transform = QTransform(rot[2][2], rot[2][0], rot[0][2], rot[0][0], 0, 0)
                 painter.setTransform(transform, True)
                 painter.setPen(Qt.NoPen)
                 painter.setBrush (c)
                 painter.drawConvexPolygon(triangle)
+                painter.restore()
+                
+                painter.save()
+                stick_pos = object["stick_pos"]
+                stick_rot = object["stick_rot"]
+                painter.translate(stick_pos[0], stick_pos[2])
+                transform = QTransform(stick_rot[2][2], stick_rot[2][0], stick_rot[0][2], stick_rot[0][0], 0, 0)
+                painter.setTransform(transform, True)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush (c)
+                painter.drawRect(QRectF (-0.125, -0.25, 0.25, 0.5))
                 painter.restore()
         painter.end()
         
