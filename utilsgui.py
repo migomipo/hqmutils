@@ -319,10 +319,13 @@ class HQMMiniMap(QWidget):
         painter.translate(4,4)
         painter.scale(scale, scale)
   
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255,255,255))      
+        painter.save() 
+        painter.setBrush(QColor(255,255,255))   
+        painter.setPen(Qt.NoPen)        
         painter.drawRoundedRect(0,0,30,61, 8.5, 8.5) 
+        painter.restore()
         
+        painter.save()
         netpen = QPen()
         netpen.setColor(QColor(128,0,0))
         netpen.setWidth(0.5)
@@ -334,8 +337,8 @@ class HQMMiniMap(QWidget):
         painter.setPen(netpen)
         for a, b in pairwise(blue_net):
             painter.drawLine(a, b)
-            
-        painter.setPen(Qt.NoPen)
+        painter.restore()
+        
         if not self.gamestate:
             painter.end()
             return
@@ -357,18 +360,29 @@ class HQMMiniMap(QWidget):
                 player = self.get_player(i)
                 if player is None or player["team"]==-1:
                     continue
+                index = str(player["index"])
                 team = player["team"]
                 rot = object["rot"]
 
                 painter.save()
                 painter.translate(pos[0], pos[2])
-                painter.setPen(Qt.NoPen)
-                if team == 0:                   
-                    painter.setBrush(QColor(255,0,0))  
+                
+                if team == 0:     
+                    c = QColor(255,0,0)       
                 elif team == 1:
-                    painter.setBrush(QColor(0,0,255))  
+                    c = QColor(0,0,255)
+                    
+                fontpen = QPen()
+                fontpen.setColor(c)
+                painter.setPen(fontpen)
+                font = QFont()
+                font.setPointSizeF (1.5)
+                painter.setFont(font)
+                painter.drawText (QRect (1, -1.0, 3, 2), Qt.AlignVCenter | Qt.AlignLeft, index)
                 transform = QTransform(rot[2][2], rot[2][0], rot[0][2], rot[0][0], 0, 0)
                 painter.setTransform(transform, True)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush (c)
                 painter.drawConvexPolygon(triangle)
                 painter.restore()
         painter.end()
