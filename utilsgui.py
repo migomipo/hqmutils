@@ -10,7 +10,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtNetwork import *
 
 
-master_addr = QHostAddress("216.55.185.95")
+master_addr = QHostAddress("66.226.72.227")
 master_port = 27590
 
 old_format = QTextCharFormat()
@@ -327,12 +327,12 @@ class HQMMiniMap(QWidget):
         
         painter.save()
         netpen = QPen()
-        netpen.setColor(QColor(128,0,0))
+        netpen.setColor(QColor(255,0,0))
         netpen.setWidth(0.5)
         painter.setPen(netpen)            
         for a, b in pairwise(red_net):
             painter.drawLine(a, b)     
-        netpen.setColor(QColor(0,0,128))
+        netpen.setColor(QColor(0,0,255))
         netpen.setWidth(0.5)
         painter.setPen(netpen)
         for a, b in pairwise(blue_net):
@@ -783,4 +783,6 @@ def show_gui():
 
 if __name__ == '__main__':
     
-    show_gui()
+    import cProfile
+
+    cProfile.run('show_gui()')

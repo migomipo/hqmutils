@@ -12,29 +12,57 @@ from twisted.internet import reactor
 from twisted.internet import task
 from bitparse import CSBitReader
 from bitparse import CSBitWriter
-from calc3d import *    
 import math
+import numpy as np
+from numba import jit
 
-master_addr = "216.55.186.104"
+master_addr = "66.226.72.227"
 master_port = 27590
 master_server = (master_addr, master_port)
 
+def calc_pos_int(pos):
+    result = int(pos*1024)
+    result = max(0, result)
+    result = min(result, 131071)
+    return result
+    
+start = np.array([[[ 0.,  1.,  0.],
+                   [ 1.,  0.,  0.],
+                   [ 0.,  0.,  1.]],
+
+                  [[ 0.,  1.,  0.],
+                   [ 0.,  0.,  1.],
+                   [-1.,  0.,  0.]],
+
+                  [[ 0.,  1.,  0.],
+                   [ 0.,  0., -1.],
+                   [ 1.,  0.,  0.]],
+
+                  [[ 0.,  1.,  0.],
+                   [-1.,  0.,  0.],
+                   [ 0.,  0., -1.]],
+
+                  [[ 0.,  0.,  1.],
+                   [ 1.,  0.,  0.],
+                   [ 0., -1.,  0.]],
+
+                  [[-1.,  0.,  0.],
+                   [ 0.,  0.,  1.],
+                   [ 0., -1.,  0.]],
+
+                  [[ 1.,  0.,  0.],
+                   [ 0.,  0., -1.],
+                   [ 0., -1.,  0.]],
+
+                  [[ 0.,  0., -1.],
+                   [-1.,  0.,  0.],
+                   [ 0., -1.,  0.]]], dtype=np.float32)
+
+
+@jit(nopython=True)
 def calc_rot_vector(len, rot):
     
-    vChoice1 = [5,5,5,5,4,1,3,2]
-    vChoice2 = [3,4,2,1,3,4,2,1]
-    vChoice3 = [4,1,3,2,0,0,0,0]    
-    
-    unitVectors = [
-        Vector3D( 0, -1,  0),
-        Vector3D(-1,  0,  0),
-        Vector3D( 0,  0, -1),
-        Vector3D( 1,  0,  0),
-        Vector3D( 0,  0,  1),
-        Vector3D( 0,  1,  0)
-    ]
 
-    
     result = 0
     if rot[0]<0:
         result |= 1
@@ -42,42 +70,29 @@ def calc_rot_vector(len, rot):
         result |= 2
     if rot[1]<0:
         result |= 4
-    a1 = unitVectors[vChoice1[result]]
-    a2 = unitVectors[vChoice2[result]]
-    a3 = unitVectors[vChoice3[result]]    
+  
+    a = start[result]
     for i in range(3, len, 2):
-        temp1 = (a1+a2).normal()
-        temp2 = (a2+a3).normal()
-        temp3 = (a3+a1).normal()
+        temp = np.vstack((a[0]+a[1],a[1]+a[2],a[0]+a[2])) 
+        temp /= np.sqrt(np.sum(temp**2, axis=1)) # temp = list of unit vectors
         
-        b1 = rot-temp3
-        b2 = temp1-temp3
-        b3 = b2.cross(b1)
+        temp2 = np.vstack((temp[1]-temp[0],temp[2]-temp[1],temp[0]-temp[2]))  # temp2 = list of vectors
         
-        if rot.dot(b3)<0:
-            b1 = rot - temp1
-            b2 = temp2-temp1
-            b3 = b2.cross(b1)
-            if rot.dot(b3)<0:
-                b1 = rot - temp2
-                b2 = temp3-temp2
-                b3 = b2.cross(b1)
-                if rot.dot(b3)<0:
+        correct = np.dot(np.cross (temp2, rot-temp), rot) # list of vectors
+        
+        if correct[2]<0:  
+            if correct[0]<0:
+                if correct[1]<0:
                     result |= 3<<i
-                    a1 = temp1
-                    a2 = temp2
-                    a3 = temp3
+                    a = temp
                 else:
                     result |= 2<<i
-                    a1 = temp3
-                    a2 = temp2                        
+                    a = np.vstack((temp[2], temp[1], a[2]))                   
             else:
                 result |= 1<<i
-                a1 = temp1
-                a3 = temp2
+                a = np.vstack((temp[0], a[1], temp[1]))
         else:
-            a2 = temp1
-            a3 = temp3
+            a = np.vstack((a[0], temp[0], temp[2]))
     return result
         
         
@@ -132,49 +147,24 @@ class ChatMessage(Message):
  
 class HQMObject():
     def __init__(self):
-        self._pos = None # Position vector
-        self._rot = None # Rotation matrix
-        self._pos_int = None
-        self._rot_int = None
+        self.pos = None # Position vector
+        self.rot = None # Rotation matrix
         self.obj_i = None
         self.type_num = None
         
-    @property
-    def pos(self):
-        return self._pos
+    def calculateRotData (self):
+        self.pos_int = [calc_pos_int(self.pos[i]) for i in range(3)]
+        self.rot_int = [calc_rot_vector(31, c) for c in self.rot.T[1:3]]
         
-    @pos.setter
-    def pos(self, new_pos):
-        self._pos = new_pos
-        self._pos_int = [self._convert_pos_to_int(new_pos[i]) for i in range(3)]
-     
-    @property
-    def rot(self):
-        return self._rot
-        
-    @rot.setter
-    def rot(self, new_rot):
-        self._rot = new_rot
-        columns = new_rot.get_column_vectors()[1:3]
-        self._rot_int = [calc_rot_vector(31, c) for c in columns]
-        
-    def _convert_pos_to_int(self, pos):
-        result = int(pos*1024)
-        result = max(0, result)
-        result = min(result, 131071)
-        return result
-        
-        
-
-    def write_object(self, bw):
-        if self.type_num is None:
-            raise NotImplementedError
+    def send (self, bw):
         bw.write_unsigned(2, self.type_num) # Object type
+        
         for i in range(3):
-            bw.write_pos(17, self._pos_int[i], None)  
-     
+            bw.write_pos(17, self.pos_int[i], None)  
+            
         for i in range(2):
-            bw.write_pos(31, self._rot_int[i], None)               
+            bw.write_pos(31, self.rot_int[i], None) 
+                
     
 class HQMPuck(HQMObject):
     def __init__(self):
@@ -192,8 +182,6 @@ class HQMPlayer(HQMObject):
         self.body_rot = None
         self.player = player
         
-    def write_object(self, bw):
-        raise NotImplementedError
            
 class HQMServerPlayer():
     def __init__(self, server, name, addr):
@@ -263,8 +251,10 @@ class HQMServer(DatagramProtocol):
             
                            
     def start_new_game(self):
+        
         self.gameID = self.gameIDalloc
         self.gameIDalloc += 1
+        print("Start new game " + str(self.gameID))
         self.redscore = 0
         self.bluescore = 0
         self.period = 0
@@ -287,7 +277,7 @@ class HQMServer(DatagramProtocol):
         for i in range(-1,2):
             for j in range(-5,5):
                 puck = self.createPuck()
-                puck.pos = Vector3D(15+5*i,1, 30+2*j)
+                puck.pos = np.array((15+5*i,1, 30+2*j), dtype=np.float32)
         
        
 
@@ -307,8 +297,9 @@ class HQMServer(DatagramProtocol):
         print((player.name + b" joined").decode("ascii"))
         self.numPlayers+=1
         if self.numPlayers==1:
-            self.start_new_game()
             print("Start loop")
+            self.start_new_game()
+            
             self.tickLoopObj.start(0.01)
         else:
             self.messages.append(JoinExitMessage(player, HQMServerStatus.online))
@@ -341,9 +332,8 @@ class HQMServer(DatagramProtocol):
         pass
         
     def setStartPuckPosition(self, puck):
-        puck.pos = Vector3D(10, 2, 10)
-        puck.rot = Matrix3D((1,0,0),(0,1,0), (0,0,1))
-        
+        puck.pos = np.array((10, 2, 10), dtype=np.float32)
+        puck.rot = np.array(((1,0,0),(0,1,0), (0,0,1)),dtype=np.float32)
         
     def setPlayerTeam(self, player, team):
         if team == HQMTeam.spec and player.o is not None:
@@ -403,6 +393,9 @@ class HQMServer(DatagramProtocol):
        # print("Tick")
         self.simulationStep()
         self.updateTime()
+        for obj in self.objects:
+            if obj:
+                obj.calculateRotData()
         
         for player in self.players: 
             if player is not None:
@@ -425,15 +418,15 @@ class HQMServer(DatagramProtocol):
         self.simstep+=1
                 
     def simulationStep(self):
-        angle = 0.10
+        angle = 0.05
         cos = math.cos(angle)
         sin = math.sin(angle)
         
-        rot_matrix = Matrix3D((1,0,0),(0, cos, -sin),(0, sin, cos))
+        rot_matrix = np.array(((1,0,0),(0, cos, -sin),(0, sin, cos)), dtype=np.float32)
     
         for obj in self.objects:
             if type(obj).__name__=="HQMPuck":
-                obj.rot = rot_matrix*obj.rot
+                obj.rot = np.matmul(obj.rot, rot_matrix)
                 
         pass #Where physics would happen if we had any
                 
@@ -464,7 +457,8 @@ class HQMServer(DatagramProtocol):
                 bw.write_unsigned(1, 0) 
             else:
                 bw.write_unsigned(1, 1) 
-                obj.write_object(bw)
+                obj.send (bw)
+
                 
         serverMsgPos = len(self.messages)
         clientMsgPos = player.msgpos
@@ -594,7 +588,10 @@ class HQMServer(DatagramProtocol):
 
 
 server = HQMServer()
-#server.name = "Zero Pucks Given".encode("ascii")
-reactor.listenUDP(28000, server)
+server.name = "MigoTest".encode("ascii")
+server.public=True
+reactor.listenUDP(27585, server)
+#reactor.run()
+import cProfile
+cProfile.run("reactor.run()")
 
-reactor.run()

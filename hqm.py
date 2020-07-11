@@ -47,59 +47,47 @@ try:
     pi = math.pi
     
     unitVectors = [
-        np.array(( 0, -1,  0), dtype=np.float32, order='C'),
-        np.array((-1,  0,  0), dtype=np.float32, order='C'),
-        np.array(( 0,  0, -1), dtype=np.float32, order='C'),
-        np.array(( 1,  0,  0), dtype=np.float32, order='C'),
-        np.array(( 0,  0,  1), dtype=np.float32, order='C'),
-        np.array(( 0,  1,  0), dtype=np.float32, order='C')
+        np.array(( 0, -1,  0), dtype=np.float32),
+        np.array((-1,  0,  0), dtype=np.float32),
+        np.array(( 0,  0, -1), dtype=np.float32),
+        np.array(( 1,  0,  0), dtype=np.float32),
+        np.array(( 0,  0,  1), dtype=np.float32),
+        np.array(( 0,  1,  0), dtype=np.float32)
     ]
     
     vChoice1 = [5,5,5,5,4,1,3,2]
     vChoice2 = [3,4,2,1,3,4,2,1]
     vChoice3 = [4,1,3,2,0,0,0,0]
 
-    def normalize(v): 
-        norm=math.sqrt(np.dot(v,v))
-        v/=norm   
-        return v
-
     def convert_rot_vector(n, bits):
         if n is None:
             return None
 
-
         lowest = n & 0x7
-        a1 = np.copy(unitVectors[vChoice1[lowest]], order='C')
-        a2 = np.copy(unitVectors[vChoice2[lowest]], order='C')
-        a3 = np.copy(unitVectors[vChoice3[lowest]], order='C')
+        a1 = unitVectors[vChoice1[lowest]]
+        a2 = unitVectors[vChoice2[lowest]]
+        a3 = unitVectors[vChoice3[lowest]]
         for i in range(3, bits, 2):
             c = (n >> i) & 3 # Two bits at a time
+
+            res = np.array((a1+a2,a2+a3,a1+a3))
+            res /= np.linalg.norm(res, axis=1)
             if c==0:
-                a2+=a1
-                a3+=a1
-                normalize(a2)
-                normalize(a3)
+                a2 = res[0]
+                a3 = res[2]
             elif c==1:
-                a1+=a2
-                a3+=a2
-                normalize(a1)
-                normalize(a3)
+                a1 = res[0]         
+                a3 = res[1]
             elif c==2:
-                a2+=a3
-                a1+=a3
-                normalize(a1)
-                normalize(a2)
+                a2 = res[1]     
+                a1 = res[2]
             elif c==3:
-                temp1 = normalize(a1+a2)
-                temp2 = normalize(a2+a3)
-                temp3 = normalize(a3+a1)
-                a1 = temp1
-                a2 = temp2
-                a3 = temp3
-        a1+=a2
-        a1+=a3
-        return normalize(a1)   
+                a1 = res[0]    # a1' = vector between a1 and a2
+                a2 = res[1]    # a2' = vector between a2 and a3
+                a3 = res[2]    # a3' = vector between a1 and a3
+        res = a1+a2+a3
+        res /= np.linalg.norm(res)
+        return res 
 except ImportError:
     pass # No numpy
     
@@ -107,6 +95,8 @@ except ImportError:
 
 
 def parse_from_server(msg):
+    if msg is None: 
+        return None
     br = CSBitReader(msg)
     if br.read_bytes_aligned(4) != header:
         return None
