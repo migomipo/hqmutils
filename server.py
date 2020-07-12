@@ -14,7 +14,7 @@ from bitparse import CSBitReader
 from bitparse import CSBitWriter
 import math
 import numpy as np
-from numba import jit
+import numba
 
 master_addr = "66.226.72.227"
 master_port = 27590
@@ -59,7 +59,7 @@ start = np.array([[[ 0.,  1.,  0.],
                    [ 0., -1.,  0.]]], dtype=np.float32)
 
 
-@jit(nopython=True)
+@numba.jit(numba.int32(numba.int32, numba.float32[:]), nopython=True)
 def calc_rot_vector(len, rot):
     
 
@@ -279,16 +279,12 @@ class HQMServer(DatagramProtocol):
                 puck = self.createPuck()
                 puck.pos = np.array((15+5*i,1, 30+2*j), dtype=np.float32)
         
-       
-
     # Adds new player. Will initially be a spectator           
     def addPlayer(self, name, addr):
         if self.numPlayers >= self.maxPlayers:
-            print("Too many players")
             return None
         i = self.__findEmptyPlayerSlot()
         if i is None:
-            print("No empty slots")
             return None 
         player = HQMServerPlayer(self, name, addr)
         player.i = i
@@ -410,8 +406,7 @@ class HQMServer(DatagramProtocol):
                 if player.gameID == self.gameID:
                     #print("Sending update")
                     self.__sendUpdate(player)
-                else: 
-                    print("New match")                
+                else:                 
                     self.__sendNewMatch(player)
                 self.packet+=1
                 
