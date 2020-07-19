@@ -3,9 +3,6 @@
 # See LICENSE for terms of use
 
 from enum import Enum
-import socket
-import struct
-import sys
 
 from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import reactor
@@ -20,11 +17,42 @@ master_addr = "66.226.72.227"
 master_port = 27590
 master_server = (master_addr, master_port)
 
+@numba.njit(numba.int32[:](numba.float32[:]))
 def calc_pos_int(pos):
-    result = int(pos*1024)
-    result = max(0, result)
-    result = min(result, 131071)
-    return result
+    return (pos*1024).astype(np.int32)
+
+@numba.njit(numba.int32[:](numba.float32[:], numba.float32[:]))
+def calc_stickPos_int(pos, playerpos):
+    return ((pos + 4 - playerpos)*1024).astype(np.int32)
+
+@numba.njit(numba.int32(numba.int32))
+def calc_bodyRot_int (rot):
+    return int(rot * 8192 + 16384)
+    
+@numba.njit(numba.float32[:](numba.float32[:]))
+def normalizeVector (v):
+    norm = np.linalg.norm (v)
+    if norm == 0:
+        return np.array((0,0,0), dtype=np.float32)
+    return v / norm
+    
+@numba.njit(numba.float32[:](numba.float32[:], numba.float32))
+def limitVectorLength (v, len):
+    norm = np.linalg.norm (v)
+    res = v.copy()
+    if norm > len:
+        res /= norm
+        res *= len
+    return res
+   
+@numba.njit(numba.float32[:](numba.float32[:], numba.float32[:], numba.float32[:], numba.float32[:]))
+def getVelocityIncludingRotation(centerpos, pos, rotationAxis, posDelta):
+    return np.cross (pos - centerpos, rotationAxis) + posDelta 
+    
+@numba.njit(numba.float32[:](numba.float32[:], numba.float32[:], numba.float32[:], numba.float32[:,:], numba.float32[:]))
+def createNewRotation (centerpos, pos, deltaChange, rot, rotForceMultiplier):
+    cross = np.cross (deltaChange, pos - centerpos)
+    return rot[0]*(np.dot(rot[0], cross)) + rot[1]*(np.dot(rot[1], cross)) + rot[2]*(np.dot(rot[2], cross))
     
 start = np.array([[[ 0.,  1.,  0.],
                    [ 1.,  0.,  0.],
@@ -59,9 +87,8 @@ start = np.array([[[ 0.,  1.,  0.],
                    [ 0., -1.,  0.]]], dtype=np.float32)
 
 
-@numba.jit(numba.int32(numba.int32, numba.float32[:]), nopython=True)
+@numba.njit(numba.int32(numba.int32, numba.float32[:]))
 def calc_rot_vector(len, rot):
-    
 
     result = 0
     if rot[0]<0:
@@ -72,29 +99,64 @@ def calc_rot_vector(len, rot):
         result |= 4
   
     a = start[result]
-    for i in range(3, len, 2):
-        temp = np.vstack((a[0]+a[1],a[1]+a[2],a[0]+a[2])) 
-        temp /= np.sqrt(np.sum(temp**2, axis=1)) # temp = list of unit vectors
-        
-        temp2 = np.vstack((temp[1]-temp[0],temp[2]-temp[1],temp[0]-temp[2]))  # temp2 = list of vectors
-        
-        correct = np.dot(np.cross (temp2, rot-temp), rot) # list of vectors
-        
-        if correct[2]<0:  
-            if correct[0]<0:
-                if correct[1]<0:
-                    result |= 3<<i
-                    a = temp
+    i = 3
+    temp1, temp2, temp3 = a[0], a[1], a[2]
+    while i < len:
+        temp4 = normalizeVector(temp1+temp2)
+        temp5 = normalizeVector(temp2+temp3)
+        temp6 = normalizeVector(temp1+temp3)
+        cross = np.cross (temp4-temp6, rot-temp6)
+        if np.dot (cross, rot) <= 0:
+            cross = np.cross (temp5-temp4, rot-temp4)
+            if np.dot (cross, rot) <= 0:
+                cross = np.cross (temp6-temp5, rot-temp5)
+                if np.dot (cross, rot) <= 0:
+                    result |= 3 << i
+                    temp1 = temp4
+                    temp2 = temp5
+                    temp3 = temp6
                 else:
-                    result |= 2<<i
-                    a = np.vstack((temp[2], temp[1], a[2]))                   
+                    result |= 2 << i
+                    temp1 = temp6
+                    temp2 = temp5
             else:
-                result |= 1<<i
-                a = np.vstack((temp[0], a[1], temp[1]))
+                result |= 1 << i
+                temp1 = temp4
+                temp3 = temp5
         else:
-            a = np.vstack((a[0], temp[0], temp[2]))
-    return result
+            temp2 = temp4
+            temp3 = temp6
         
+    
+        i += 2
+    return result
+    
+@numba.njit(numba.float32[:](numba.float32[:], numba.float32[:], numba.float32))
+def rotateVectorAroundAxis (v, axis, angle):
+    cross1 = np.cross (v, axis)
+    cross2 = np.cross (axis, cross1)
+    return np.dot (v, axis) * axis + np.cos(angle) * cross2 + np.sin(angle) * cross1
+    
+@numba.njit(numba.float32[:,:](numba.float32[:,:], numba.float32[:], numba.float32))
+def rotateMatrixAroundAxis (matrix, axis, angle):
+    res = np.empty((3,3), dtype=np.float32)
+    for c in range(0, 3):
+        res[c] = rotateVectorAroundAxis (matrix[c], axis, angle)
+    return res
+        
+@numba.njit(numba.float32[:](numba.float32[:], numba.float32[:], numba.float32))
+def projectionThing (a, normal, scale):
+    aProjectionLen = np.dot(a, normal)
+    aProjection = aProjectionLen * normal
+    aRejection = a - aProjection
+    aRejectionLen = np.linalg.norm (aRejection)
+    if aRejectionLen > 0.00001:
+        aRejectionNormal = aRejection / aRejectionLen
+        aRejectionLen = max (aRejectionLen, aProjectionLen * scale)
+        return aProjection + aRejectionLen * aRejectionNormal
+    else:
+        return aProjection
+
         
 class HQMServerStatus(Enum):
     offline = 0
@@ -148,45 +210,81 @@ class ChatMessage(Message):
 class HQMObject():
     def __init__(self):
         self.pos = None # Position vector
+        self.posDelta = None
         self.rot = None # Rotation matrix
+        self.rotAxis = None
         self.obj_i = None
         self.type_num = None
         
-    def calculateRotData (self):
-        self.pos_int = [calc_pos_int(self.pos[i]) for i in range(3)]
-        self.rot_int = [calc_rot_vector(31, c) for c in self.rot.T[1:3]]
-        
-    def send (self, bw):
-        bw.write_unsigned(2, self.type_num) # Object type
-        
-        for i in range(3):
-            bw.write_pos(17, self.pos_int[i], None)  
-            
-        for i in range(2):
-            bw.write_pos(31, self.rot_int[i], None) 
-                
+    def get_packet (self):
+        res = {
+           "type": self.type_num,
+           "pos": calc_pos_int(self.pos),
+           "rot": np.array([calc_rot_vector(31, c) for c in self.rot[1:3]])
+        }
+        return res
+           
     
 class HQMPuck(HQMObject):
     def __init__(self):
         super().__init__()
         self.type_num = 1
-
+        
+        
     
 class HQMPlayer(HQMObject):
     def __init__(self, player):
         super().__init__()
         self.type_num = 0
-        self.stick_pos = None
-        self.stick_rot = None
-        self.head_rot = None
-        self.body_rot = None
+        self.stickPos = None
+        self.stickRot = None
+        self.headRot = None
+        self.bodyRot = None
         self.player = player
+        self.height = 0.75
+        self.rotForceMultiplier = np.array((2.75, 6.16, 2.35), dtype=np.float32)
+
+        self.pos = np.array((10, 2, 10), dtype=np.float32)
+        self.posDelta = np.array((0, 0, 0), dtype=np.float32)
+
+        self.rot = np.eye(3, dtype=np.float32)
+        self.rotAxis = np.array((0, 0, 0), dtype=np.float32)
+
+        self.stickPos = self.pos.copy()
+        self.stickPosDelta = np.array((0, 0, 0), dtype=np.float32)
+        self.stickRot = np.eye(3, dtype=np.float32)
+
+        self.stickRotCurrentPlacement = np.array((0, 0), dtype=np.float32)
+        self.stickRotCurrentPlacementDelta = np.array((0, 0), dtype=np.float32)
         
-           
+    def get_packet (self):
+        res = super().get_packet()
+        res.update ({
+            "stickPos": calc_stickPos_int(self.stickPos, self.pos),
+            "stickRot": np.array([calc_rot_vector(25, c) for c in self.stickRot[1:3]]),
+            "headRot": calc_bodyRot_int (self.headRot),
+            "bodyRot": calc_bodyRot_int (self.bodyRot)
+        })
+        return res
+
+
+        
 class HQMServerPlayer():
-    def __init__(self, server, name, addr):
+    def __init__(self, name):
         self.obj = None
-        self.server = server
+        self.name = name
+        self.team = HQMTeam.spec   
+        self.isRealPlayer = False
+        
+    def reset(self):
+        pass
+        
+    def send(self, server):
+        pass
+           
+class HQMExternalPlayer(HQMServerPlayer):
+    def __init__(self, name, addr):
+        self.obj = None
         self.name = name
         self.team = HQMTeam.spec   
         self.addr = addr
@@ -196,14 +294,22 @@ class HQMServerPlayer():
         self.packet = -1
         self.inactivity = 0
         
+        self.stickAngleFromClient = 0
+        self.turnFromClient = 0
+        self.fwbwFromClient = 0
+        self.stickRotFromClient = np.array((0,0), dtype=np.float32)
+        self.headBodyRotFromClient = np.array((0,0), dtype=np.float32)
+        self.keyInputFromClient = 0
+        self.prevKeyInputFromClient = 0
+        self.isRealPlayer = True
+
     def reset(self):
         self.msgpos = 0
         self.msgrepindex = -1
         self.packet = -1      
         self.team = HQMTeam.spec 
         self.obj = None
- 
-   
+        
 
 class HQMServer(DatagramProtocol):
     
@@ -211,12 +317,11 @@ class HQMServer(DatagramProtocol):
         
         self.gameIDalloc = 1
         
-        self.maxPlayers = 16
         self.numPlayers = 0
-        self.players = [None]*self.maxPlayers
+        self.players = [None]*256
         self.teamSize = 5
         self.name = b"Default name"
-        self.public = True
+        self.public = False
         
         self.gameID = None
         self.redscore = 0
@@ -226,11 +331,10 @@ class HQMServer(DatagramProtocol):
         self.timeout = 0        
         self.gameover = 0      
         self.simstep = 0
-        self.packet = 0
+        self.packet_id = -1
         self.msgpos = 0
         self.objects = [None]*32
         self.messages = []
-        
         
         def tickLoop():
             self.__tickLoop()
@@ -262,35 +366,27 @@ class HQMServer(DatagramProtocol):
         self.timeout = 0        
         self.gameover = 0      
         self.simstep = 0
-        self.packet = 0
+        self.packet_id = -1
         self.msgpos = 0
         self.objects = [None]*32
         self.messages = [] 
         for player in self.players:
             
             if player is not None:
-                if player.obj:
-                    self._removeObject(playerObj)
                 player.reset()
                 self.messages.append(JoinExitMessage(player, HQMServerStatus.online))
                 
-        for i in range(-1,2):
-            for j in range(-5,5):
-                puck = self.createPuck()
-                puck.pos = np.array((15+5*i,1, 30+2*j), dtype=np.float32)
         
     # Adds new player. Will initially be a spectator           
-    def addPlayer(self, name, addr):
-        if self.numPlayers >= self.maxPlayers:
-            return None
+    def addPlayer(self, player):
         i = self.__findEmptyPlayerSlot()
         if i is None:
             return None 
-        player = HQMServerPlayer(self, name, addr)
+
         player.i = i
         self.players[i] = player 
 
-        print((player.name + b" joined").decode("ascii"))
+        print(player.name.decode("ascii") + " joined")
         self.numPlayers+=1
         if self.numPlayers==1:
             print("Start loop")
@@ -316,35 +412,40 @@ class HQMServer(DatagramProtocol):
             print("Stop loop")
             self.tickLoopObj.stop()
             
-            
-    def createPuck(self):
-        puck = HQMPuck()
-        self.setStartPuckPosition(puck)
-        if self._addObject(puck):
-            return puck
-        else: return None
+    def spawnPlayer (self, player, team):
+        playerObj = HQMPlayer (player)
+        playerObj.pos = np.array((10, 2, 10), dtype=np.float32)
+        playerObj.posDelta = np.array((0,0,0), dtype=np.float32)
         
-    def setStartPlayerPosition(self, player):
-        pass
+        playerObj.rot = np.eye(3, dtype=np.float32)
+        playerObj.rotAxis = np.array((0,0,0), dtype=np.float32)
         
-    def setStartPuckPosition(self, puck):
-        puck.pos = np.array((10, 2, 10), dtype=np.float32)
-        puck.rot = np.array(((1,0,0),(0,1,0), (0,0,1)),dtype=np.float32)
+        playerObj.stickPos = playerObj.pos.copy()
+        playerObj.stickPosDelta = np.array((0,0,0), dtype=np.float32)
+        playerObj.stickRot = np.eye(3, dtype=np.float32)
+        
+        playerObj.stickRotCurrentPlacement = np.array((0,0), dtype=np.float32)
+        playerObj.stickRotCurrentPlacementDelta = np.array((0,0), dtype=np.float32)
+        
+        playerObj.headRot = np.float32(0)
+        playerObj.bodyRot = np.float32(0)
+        return playerObj
+                    
         
     def setPlayerTeam(self, player, team):
-        if team == HQMTeam.spec and player.o is not None:
+        if team == HQMTeam.spec and player.obj is not None:
             self._removeObject(player.obj)
             player.team = HQMTeam.spec
             player.obj = None
             self.messages.append(JoinExitMessage(player, HQMServerStatus.online)) # Still in the server
             return True
-        elif (team == HQMSpec.blue or HQMSpec.red) and player.team == HQMTeam.spec:
-             playerObj = HQMPlayer(player)
+        elif (team == HQMTeam.blue or HQMTeam.red) and player.team == HQMTeam.spec:
+             playerObj = self.spawnPlayer(player, team)
              
              if self._addObject(playerObj):
                  player.team = team
                  player.obj = playerObj
-                 self.startPlayerPosition(player)
+                 
                  self.messages.append(JoinExitMessage(player, HQMServerStatus.online)) # Still in the server  
                  return True
              else:
@@ -363,7 +464,7 @@ class HQMServer(DatagramProtocol):
             return False
         self.objects[index] = obj
         obj.obj_i = index
-        return True
+        return True 
         
     def _removeObject(self, obj):
         self.objects[obj.obj_i] = None
@@ -373,66 +474,209 @@ class HQMServer(DatagramProtocol):
             if object is None:
                 return index           
         return None
-        
-    def updateTime(self):
-        self.timeleft-=1
-        if(self.timeleft==0):
-            self.timeleft = 30000
-        pass #Let's not do anything this time        
-                
+
     def incomingChatLine(self, player, chatLine):
-        print((player.name + b": " + chatLine).decode("ascii"))
+        print(player.name.decode("ascii") + ": " + chatLine.decode("ascii"))
         self.messages.append(ChatMessage(player.i, chatLine))
-              
-        
+
     def __tickLoop(self):
-       # print("Tick")
-        self.simulationStep()
-        self.updateTime()
-        for obj in self.objects:
-            if obj:
-                obj.calculateRotData()
-        
-        for player in self.players: 
+        for player in self.players:
             if player is not None:
-                player.inactivity += 1
-                if player.inactivity >= 1200:
-                    self.removePlayer(player)
-        if self.simstep % 2 == 1:
+                if player.keyInputFromClient & 4 > 0:
+                    self.setPlayerTeam (player, HQMTeam.red)
+                    # Join red
+                elif player.keyInputFromClient & 8 > 0:
+                    self.setPlayerTeam (player, HQMTeam.blue)
+
+        self.simulationStep()
+        
+        self.updateTime()
+        
+        if self.simstep & 1 == 0:
+            self.packet_id += 1
+            packets = [obj.get_packet() if obj else None for obj in self.objects]
+            
             for player in self.players:              
-                if player is None:
+                if player is None or not player.isRealPlayer:
                     continue
                 
-                if player.gameID == self.gameID:
-                    #print("Sending update")
-                    self.__sendUpdate(player)
-                else:                 
-                    self.__sendNewMatch(player)
-                self.packet+=1
-                
+                player.inactivity += 1
+                if player.inactivity >= 1200:
+                    print ("Inactive")
+                    self.removePlayer(player)
+                else: 
+                    if player.gameID == self.gameID:
+                        self.sendUpdate(player, packets)
+                    else:                 
+                        self.sendNewMatch(player)
         self.simstep+=1
                 
     def simulationStep(self):
-        angle = 0.05
-        cos = math.cos(angle)
-        sin = math.sin(angle)
-        
-        rot_matrix = np.array(((1,0,0),(0, cos, -sin),(0, sin, cos)), dtype=np.float32)
+        for object in self.objects:
+            if isinstance(object, HQMPlayer):
+                player = object.player
+                object.pos += object.posDelta
+                object.posDelta[1] -= 0.000680 # Some gravitational acceleration
+                
+                feet_pos = object.pos - object.height * object.rot[1]
+                if feet_pos[1] < 0:
+                    fwbwFromClient = player.fwbwFromClient
+                    if fwbwFromClient > 0:
+                        temp = -object.rot[2].copy()
+                        temp[1] = 0
+                        
+                        temp = normalizeVector(temp)
+                        temp = temp * 0.05 - object.posDelta
+                        
+                        dot = np.dot (object.posDelta, object.rot[2])
+                        temp2 = 0.00055555 if dot > 0 else 0.000208
+                            
+                        object.posDelta += limitVectorLength (temp, temp2)
+                    elif fwbwFromClient < 0:
+                        temp = object.rot[2].copy()
+                        temp[1] = 0
+                        temp = normalizeVector(temp)
+                        temp = temp * 0.05 - object.posDelta
+
+                        dot = np.dot (object.posDelta, object.rot[2])
+                        temp2 = 0.00055555 if dot < 0 else 0.000208
+                            
+                        object.posDelta += limitVectorLength (temp, temp2)
+                    if player.keyInputFromClient & 1 == 1 and player.prevKeyInputFromClient & 1 != 1:
+                        # Jump
+                        object.posDelta[1] += 0.025
+                        # TODO: Collision bodies
+                if player.keyInputFromClient & 0x10 > 0:
+                    temp = object.rot[0].copy()
+                    temp[1] = 0
+                    
+                    temp = normalizeVector(temp)
+                    temp *= np.clip(player.turnFromClient, -1, 1) * 0.033333
+                    temp -= object.posDelta
+                    
+                    object.posDelta += limitVectorLength(temp, 0.00027777778)
+                    turn = -np.clip(player.turnFromClient, -1, 1) * 5.6 / 14400.0
+                    object.rotAxis += object.rot[1] * turn
+                        
+                else:
+                    turn = np.clip(player.turnFromClient, -1, 1) * 6.0 / 14400.0
+                    object.rotAxis += object.rot[1] * turn
+                rotAxisMagnitude = np.linalg.norm(object.rotAxis)    
+                if rotAxisMagnitude > 0.00001:
+                    object.rot = rotateMatrixAroundAxis (object.rot, object.rotAxis / rotAxisMagnitude, rotAxisMagnitude)
+                # TODO : Head and body rotation    
+                # TODO: Adjust collision bodies
+                posDeltaOld = object.posDelta.copy()
+                rotAxisOld = object.rotAxis.copy()
+                
+                # TODO: Collision stuff
+                if player.keyInputFromClient & 2 > 0:
+                    # Crouch (Ctrl)
+                    object.height = max (0.25, object.height - 0.015625)
+                else:
+                    object.height = min (0.75, object.height + 0.125)
+                  
+                isTooLow = False
+                feetPos = object.pos - object.rot[1] * object.height
+                if feetPos[1] < 0:
+                    temp = -feetPos[1] * 0.125 * 0.125 * 0.25
+                    temp2 = np.array((0, 1, 0), dtype=np.float32)
+                    temp1 = temp2 * temp - 0.25 * object.posDelta
+                    if np.dot (temp1, temp2) > 0:
+                        temp3 = object.rot[2].copy()
+
+                        temp3[1] = 0
+                        temp3 = normalizeVector(temp3)
     
-        for obj in self.objects:
-            if type(obj).__name__=="HQMPuck":
-                obj.rot = np.matmul(obj.rot, rot_matrix)
+                        temp1 -= temp3*np.dot(temp1, temp3)
+                        projectionFactor = 0.4 if player.keyInputFromClient & 0x10 > 0 else 1.2
+                        object.posDelta += projectionThing (temp1, temp2, projectionFactor)
+                        isTooLow = True
+                        
+                if object.pos[1] < 0.5 and np.linalg.norm(object.posDelta) < 0.025:
+                    object.posDelta[1] += 0.000555555
+                    isTooLow = True
+                if isTooLow:
+                    object.rotAxis *= 0.975  # Slow down spinning a bit
+                    unit = np.array((0, 1, 0), dtype=np.float32)
+                    if player.keyInputFromClient & 0x10 == 0:
+                        spin = (-np.dot (object.posDelta, object.rot[2]) / 0.05) * player.turnFromClient * 0.225
+                        unit = rotateVectorAroundAxis (unit, object.rot[2], spin)
+                    temp1 = np.cross (unit, object.rot[1])
+                    temp1_normalized = normalizeVector (temp1)
+                    temp1 *= 0.008333333333
+                    temp1 -= 0.25 * np.dot(object.rotAxis, temp1_normalized) * temp1_normalized
+                    temp1 = limitVectorLength(temp1, 0.000347)
+                    
+                    object.rotAxis += temp1
+
+                stickPlacementDiff = player.stickRotFromClient - object.stickRotCurrentPlacement
+                stickPlacementAdjust = limitVectorLength (0.0625 * stickPlacementDiff - 0.5 * object.stickRotCurrentPlacementDelta, 0.00888888888)
+
+                object.stickRotCurrentPlacementDelta += stickPlacementAdjust
+                object.stickRotCurrentPlacement += object.stickRotCurrentPlacementDelta
+
+                stickPosPivot1 = object.pos + np.array((-0.375, -0.5, -0.125), dtype=np.float32) @ object.rot
+                stickPosPivot2 = object.pos + np.array((-0.375, 0.5, -0.125), dtype=np.float32) @ object.rot
+
+                defaultStickPosDiff = (object.stickPos - stickPosPivot1) @ object.rot.T
+
+                currentAzimuth = math.atan2(defaultStickPosDiff[0], -defaultStickPosDiff[2])
+                currentInclination = math.atan2(-defaultStickPosDiff[1], math.sqrt(defaultStickPosDiff[0]**2 + defaultStickPosDiff[2]**2))
+
+                newStickRotation = object.rot
+                newStickRotation = rotateMatrixAroundAxis(newStickRotation, newStickRotation[1], currentAzimuth)
+                newStickRotation = rotateMatrixAroundAxis(newStickRotation, newStickRotation[0], currentInclination)
+
+                object.stickRot = newStickRotation
+
+                targetRotation = object.rot
+                targetRotation = rotateMatrixAroundAxis (targetRotation, targetRotation[1], object.stickRotCurrentPlacement[0])
+                targetRotation = rotateMatrixAroundAxis (targetRotation, targetRotation[0], object.stickRotCurrentPlacement[1])
+
+                if object.stickRotCurrentPlacement[1] > 0:
+                    object.stickRot = rotateMatrixAroundAxis(object.stickRot, object.stickRot[1],
+                                                             object.stickRotCurrentPlacement[1] * 0.5 * np.pi)
+
+                stickHandleAxis = normalizeVector(object.stickRot[2] + 0.75 * object.stickRot[1])
+                object.stickRot = rotateMatrixAroundAxis(object.stickRot, stickHandleAxis,
+                                                         -0.25 * np.pi * player.stickAngleFromClient)
+
+                rotatedTargetRotation = rotateMatrixAroundAxis(targetRotation, targetRotation[0], np.pi / 4)
+                stickTemp = stickPosPivot2 - 1.75 * rotatedTargetRotation[2]
+                if stickTemp[1] < 0:
+                    stickTemp[1] = 0
+                stickTemp2 = 0.125 * (stickTemp - object.stickPos) - 0.5 * object.stickPosDelta
+                stickTemp2 += 0.5 * getVelocityIncludingRotation(object.pos, stickTemp, rotAxisOld, posDeltaOld)
+
+                object.stickPosDelta += 0.996 * stickTemp2
+                counterForce = -0.004 * stickTemp2
+
+                object.posDelta += counterForce
+                object.rotAxis += createNewRotation(object.pos, stickTemp, counterForce, object.rot, object.rotForceMultiplier)
+
+
+                player.prevKeyInputFromClient = player.keyInputFromClient
+        for object in self.objects:
+            if isinstance(object, HQMPlayer):
+                for i in range(10):
+                    object.stickPos += object.stickPosDelta*0.1
                 
-        pass #Where physics would happen if we had any
+                    
+        
+    def updateTime (self):
+        self.timeleft -= 1
+        if self.timeleft == 0:
+            self.timeleft = 30000
                 
-    def __sendNewMatch(self, player):
+    def sendNewMatch(self, player):
         bw = CSBitWriter()
         bw.write_bytes_aligned(b"Hock")
         bw.write_unsigned_aligned(8, 6)
         bw.write_unsigned_aligned(32, self.gameID)
         self.transport.write(bw.get_bytes(), player.addr)
         
-    def __sendUpdate(self, player):
+    def sendUpdate(self, player, packets):
         bw = CSBitWriter()
         bw.write_bytes_aligned(b"Hock")
         bw.write_unsigned_aligned(8, 5)
@@ -445,16 +689,34 @@ class HQMServer(DatagramProtocol):
         bw.write_unsigned(16, self.timeout)
         bw.write_unsigned(8, self.period)
         bw.write_unsigned(8, player.i)
-        bw.write_unsigned_aligned(32, self.packet)
+        bw.write_unsigned_aligned(32, self.packet_id) # Current packet ID
         bw.write_unsigned_aligned(32, player.packet)
-        for index, obj in enumerate(self.objects):
+
+        for index, obj in enumerate(packets):
             if obj is None:
                 bw.write_unsigned(1, 0) 
             else:
                 bw.write_unsigned(1, 1) 
-                obj.send (bw)
+                bw.write_unsigned(2, obj["type"]) # Object type
+        
+                bw.write_pos(17, obj["pos"][0], None)
+                bw.write_pos(17, obj["pos"][1], None) 
+                bw.write_pos(17, obj["pos"][2], None) 
 
+                bw.write_pos(31, obj["rot"][0], None) 
+                bw.write_pos(31, obj["rot"][1], None) 
                 
+                if obj["type"] == 0:
+                    bw.write_pos(13, obj["stickPos"][0])
+                    bw.write_pos(13, obj["stickPos"][1])
+                    bw.write_pos(13, obj["stickPos"][2])
+
+                    bw.write_pos(25, obj["stickRot"][0])
+                    bw.write_pos(25, obj["stickRot"][1])
+
+                    bw.write_pos(16, obj["headRot"])
+                    bw.write_pos(16, obj["bodyRot"])
+
         serverMsgPos = len(self.messages)
         clientMsgPos = player.msgpos
         
@@ -464,10 +726,8 @@ class HQMServer(DatagramProtocol):
         size = min(size, 15)
         bw.write_unsigned(4, size)
         bw.write_unsigned(16, clientMsgPos)
-        #print(self.messages[clientMsgPos:])
         for i in range(clientMsgPos, clientMsgPos+size):            
             self.messages[i].write(bw)
-        #print(bw.get_bytes())
         self.transport.write(bw.get_bytes(), player.addr)    
         
     def __findEmptyPlayerSlot(self):
@@ -475,17 +735,14 @@ class HQMServer(DatagramProtocol):
             if player is None:
                 return index           
         return None
-       
-        
+
     def __findPlayer(self, addr):
         for player in self.players:
-            if player is not None and player.addr == addr:
+            if player is not None and hasattr(player, 'addr') and player.addr == addr:
                 return player     
         return None
-            
-    
+
     def datagramReceived(self, data, addr):
-        #print("received %r from %s" % (data, addr))
         br = CSBitReader(data)
         header = br.read_bytes_aligned(4)
 
@@ -493,23 +750,20 @@ class HQMServer(DatagramProtocol):
             print("Not hock")
             return
         cmd = br.read_unsigned_aligned(8)
-        if cmd==0:
-            #print("Ping")
+        if cmd == 0:
             # ping
             self.__handlePing(br, addr)
-        elif cmd==2:
-            #print("Join")
+        elif cmd == 2:
             self.__handleJoin(br, addr)
-        elif cmd==4:
-            #print("Update")
+        elif cmd == 4:
             self.__handleUpdate(br, addr)
-        elif cmd==7:
-            #print("Exit")
+        elif cmd == 7:
             self.__handleExit(br, addr)
-        
-        
+
     def __handlePing(self, br, addr):
         clientVersion = br.read_unsigned(8)
+        if clientVersion != 55:
+            return
         deltaTime = br.read_unsigned(32)
         bw = CSBitWriter()
         bw.write_bytes_aligned(b"Hock")
@@ -523,35 +777,27 @@ class HQMServer(DatagramProtocol):
         self.transport.write(bw.get_bytes(), addr)
         
     def __handleJoin(self, br, addr):
-        if self.numPlayers == self.maxPlayers:
-            return
         clientVersion = br.read_unsigned(8)
-        if clientVersion!=55:
-            print("Wrong version")
+        if clientVersion != 55:
             return
         if self.__findPlayer(addr) is not None:
-            print("Player has already joined")
-            return # This player has already joined
-        
-        
+            return  # This player has already joined
+
         name = br.read_bytes_aligned(32)
         firstZero = name.find(0)
         if firstZero != -1:
             name = name[:firstZero]
                
-        self.addPlayer(name, addr)
-        
-        #print("{} wants to join".format(name))
+        self.addPlayer(HQMExternalPlayer (name, addr))
         
     def __handleExit(self, br, addr):
         print("Exit")
         player = self.__findPlayer(addr)
         if player is None:
-            return #Exit from unknown player? Weird
+            return # Exit from unknown player? Weird
         
         self.removePlayer(player)
         
-
         
     def __handleUpdate(self, br, addr):
         player = self.__findPlayer(addr)
@@ -559,15 +805,13 @@ class HQMServer(DatagramProtocol):
             return #Update from unknown player? Weird
         player.inactivity = 0 # We have an update from this player
         player.gameID = br.read_unsigned_aligned(32)
-        stickAngle = br.read_sp_float_aligned()
-        turn = br.read_sp_float_aligned()
-        whatever = br.read_sp_float_aligned()
-        forwardBackward = br.read_sp_float_aligned()
-        stickX = br.read_sp_float_aligned()
-        stickY = br.read_sp_float_aligned()
-        headX = br.read_sp_float_aligned()
-        headY = br.read_sp_float_aligned()
-        keys = br.read_unsigned_aligned(32)
+        player.stickAngleFromClient = br.read_sp_float_aligned()
+        player.turnFromClient = br.read_sp_float_aligned()
+        br.read_sp_float_aligned() #Unknown value
+        player.fwbwFromClient = br.read_sp_float_aligned()
+        player.stickRotFromClient = np.array((br.read_sp_float_aligned(), br.read_sp_float_aligned()), dtype=np.float32)
+        player.headBodyRotFromClient = np.array((br.read_sp_float_aligned(), br.read_sp_float_aligned()), dtype=np.float32)
+        player.keyInputFromClient = br.read_unsigned_aligned(32)
         player.packet = br.read_unsigned_aligned(32)
         player.msgpos = br.read_unsigned(16)
         isChatting = br.read_unsigned(1) == 1
@@ -579,14 +823,11 @@ class HQMServer(DatagramProtocol):
                 chatLine = br.read_bytes_aligned(chatSize)
                 self.incomingChatLine(player, chatLine)
                 
-                
-
 
 server = HQMServer()
 server.name = "MigoTest".encode("ascii")
-server.public=True
+server.public=False
 reactor.listenUDP(27585, server)
-#reactor.run()
-import cProfile
-cProfile.run("reactor.run()")
+reactor.run()
+
 
