@@ -11,7 +11,10 @@ from bitparse import CSBitReader
 from bitparse import CSBitWriter
 import math
 import numpy as np
-from numba import njit, float32, int32, types, optional
+import numba
+from numba import njit, float32, int32
+import numba.typed
+import numba.types
 
 master_addr = "66.226.72.227"
 master_port = 27590
@@ -31,10 +34,14 @@ def calcStickPosInt(pos, playerpos):
 def calcBodyRotInt (rot):
     x = int(rot * 8192 + 16384)
     return np.minimum(np.maximum(x, np.int32(0)), np.int32(0x7FFF))
+
+@njit(float32(float32[:]))
+def getVectorLength(x):
+    return np.sqrt(x.dot(x))
     
 @njit(float32[:](float32[:]))
 def normalizeVector (v):
-    norm = np.linalg.norm (v)
+    norm = getVectorLength (v)
     if norm == 0:
         return np.array((0,0,0), dtype=np.float32)
     return v / norm
@@ -42,20 +49,19 @@ def normalizeVector (v):
     
 @njit(float32[:](float32[:], float32))
 def limitVectorLength (v, len):
-    norm = np.linalg.norm (v)
+    norm = getVectorLength (v)
     res = v.copy()
     if norm > len:
         res /= norm
         res *= len
     return res
 
-   
 @njit(float32[:](float32[:], float32[:], float32[:], float32[:]))
 def getVelocityIncludingRotation(centerpos, pos, rotationAxis, posDelta):
     return np.cross (pos - centerpos, rotationAxis) + posDelta
 
     
-#@njit(float32[:](float32[:], float32[:], float32[:], float32[:,:], float32[:]))
+@njit(float32[:](float32[:], float32[:], float32[:], float32[:,:], float32[:]))
 def createNewRotation (centerpos, pos, deltaChange, rot, rotForceMultiplier):
     cross = np.cross (deltaChange, pos - centerpos)
     v = (cross @ rot.T) * rotForceMultiplier
@@ -90,45 +96,37 @@ def createStickPlanes (pos, rot, stickSize):
     return pos + boxPlanesResized
 
 
- # 3,         2,         1,         0
- # 7,         6,         2,         3
- # 4,         7,         3,         0
- # 5,         4,         0,         1
- # 6,         5,         1,         2
- # 4,         5,         6,         7
-
-    
 vectorToIntVectors = np.array([[[0., 1., 0.],
-                                [ 1.,  0.,  0.],
-                                [ 0.,  0.,  1.]],
+                                [1., 0., 0.],
+                                [0., 0., 1.]],
 
-                               [[ 0.,  1.,  0.],
-                   [ 0.,  0.,  1.],
-                   [-1.,  0.,  0.]],
+                               [[0., 1., 0.],
+                                [0., 0., 1.],
+                                [-1., 0., 0.]],
 
-                               [[ 0.,  1.,  0.],
-                   [ 0.,  0., -1.],
-                   [ 1.,  0.,  0.]],
+                               [[0., 1., 0.],
+                                [0., 0., -1.],
+                                [1., 0., 0.]],
 
-                               [[ 0.,  1.,  0.],
-                   [-1.,  0.,  0.],
-                   [ 0.,  0., -1.]],
+                               [[0., 1., 0.],
+                                [-1., 0., 0.],
+                                [0., 0., -1.]],
 
-                               [[ 0.,  0.,  1.],
-                   [ 1.,  0.,  0.],
-                   [ 0., -1.,  0.]],
+                               [[0., 0., 1.],
+                                [1., 0., 0.],
+                                [0., -1., 0.]],
 
-                               [[-1.,  0.,  0.],
-                   [ 0.,  0.,  1.],
-                   [ 0., -1.,  0.]],
+                               [[-1., 0., 0.],
+                                [0., 0., 1.],
+                                [0., -1., 0.]],
 
-                               [[ 1.,  0.,  0.],
-                   [ 0.,  0., -1.],
-                   [ 0., -1.,  0.]],
+                               [[1., 0., 0.],
+                                [0., 0., -1.],
+                                [0., -1., 0.]],
 
-                               [[ 0.,  0., -1.],
-                   [-1.,  0.,  0.],
-                   [ 0., -1.,  0.]]], dtype=np.float32)
+                               [[0., 0., -1.],
+                                [-1., 0., 0.],
+                                [0., -1., 0.]]], dtype=np.float32)
 
 
 @njit(int32(int32, float32[:]))
@@ -193,7 +191,7 @@ def projectionThing (a, normal, scale):
     aProjectionLen = np.dot(a, normal)
     aProjection = aProjectionLen * normal
     aRejection = a - aProjection
-    aRejectionLen = np.linalg.norm (aRejection)
+    aRejectionLen = getVectorLength (aRejection)
     if aRejectionLen > 0.00001:
         aRejectionNormal = aRejection / aRejectionLen
         if aRejectionLen > aProjectionLen * scale:
@@ -225,7 +223,38 @@ def puckOverlapsPlane (p, v, planeStartPoint, planeNormal):
                 return overlap, p + overlap * vertexPosDiff
         return None
 
-def puckOverlapsPlane2 (puckPosition, puckVertex, planeStartPoint, p1, p2, planeNormal):
+@njit(numba.types.ListType(numba.types.Tuple((float32[:], float32, float32[:])))(float32[:], float32[:,:], float32[:,:,:]))
+def puckTest (puckPosition, vs, stickPlanes):
+    res = numba.typed.List()
+    for v in vs:
+        currentOverlap = np.float32(1)
+        for stickPlane in stickPlanes:
+            for s, p1, p2 in [(stickPlane[0], stickPlane[1], stickPlane[2]), (stickPlane[0], stickPlane[2], stickPlane[3])]:
+                normal = calculateNormal (s, p1, p2)
+                if np.dot(s - v, normal) >= 0:
+                    dot2 = np.dot(s - puckPosition, normal)
+                    if dot2 <= 0:
+                        vertexPosDiff = v - puckPosition
+                        dot3 = np.dot(vertexPosDiff, normal)
+                        if dot3 != 0:
+                            overlap = dot2/dot3
+                            overlapPos = puckPosition + overlap * vertexPosDiff
+                            if np.dot(np.cross(overlapPos - s, p1 - s), normal) >= 0 and \
+                                    np.dot(np.cross(overlapPos - p1, p2 - p1), normal) >= 0 and \
+                                    np.dot(np.cross(overlapPos - p2, s - p2), normal) >= 0:
+                                if overlap < currentOverlap:
+                                    currentOverlap = overlap
+                                    currentNormal = normal
+                                    currentDot = np.dot(overlapPos - v, normal)
+
+        if currentOverlap < 1:
+            res.append((v, currentDot, currentNormal))
+    #res.append((np.array((0,0,0), dtype=np.float32), np.float32(0) ,np.array((0,0,0), dtype=np.float32)))
+    return res
+
+
+
+def puckVertexCollidesWithStick2 (puckPosition, puckVertex, planeStartPoint, p1, p2, planeNormal):
     overlap1 = puckOverlapsPlane(puckPosition, puckVertex, planeStartPoint, planeNormal)
     if overlap1:
         overlap, overlapPos = overlap1
@@ -243,7 +272,7 @@ def puckVertexCollidesWithStick (position, vertex, stickPlanes):
     for stickPlane in stickPlanes:
         for s in [(stickPlane[0], stickPlane[1], stickPlane[2]), (stickPlane[0], stickPlane[2], stickPlane[3])]:
             normal = calculateNormal (s[0], s[1], s[2])
-            overlap1 = puckOverlapsPlane2(position, vertex, s[0], s[1], s[2], normal)
+            overlap1 = puckVertexCollidesWithStick2(position, vertex, s[0], s[1], s[2], normal)
             if overlap1:
                 overlap, overlapPos = overlap1
                 if overlap < currentOverlap:
@@ -455,7 +484,7 @@ class HQMRink:
             p2[1] = 0
             if p2[0]*dir[0]<0 and p2[2]*dir[2]<0:
                 # Within the box that contains the corner
-                diff = np.linalg.norm(p2) - radius
+                diff = getVectorLength(p2) - radius
                 if diff > maxProj:
                     collisionNormal = normalizeVector(p2)
                     maxProj = diff
@@ -739,7 +768,7 @@ class HQMServer(DatagramProtocol):
             else:
                 turn = np.clip(player.turnFromClient, -1, 1) * 6.0 / 14400.0
                 object.rotAxis += object.rot[1] * turn
-            rotAxisMagnitude = np.linalg.norm(object.rotAxis)
+            rotAxisMagnitude = getVectorLength(object.rotAxis)
             if rotAxisMagnitude > 0.00001:
                 object.rot = rotateMatrixAroundAxis (object.rot, object.rotAxis / rotAxisMagnitude, rotAxisMagnitude)
             # TODO : Head and body rotation
@@ -774,7 +803,7 @@ class HQMServer(DatagramProtocol):
                     object.posDelta += projectionThing (temp1, yUnit, projectionFactor)
                     isTooLow = True
 
-            if object.pos[1] < 0.5 and np.linalg.norm(object.posDelta) < 0.025:
+            if object.pos[1] < 0.5 and getVectorLength(object.posDelta) < 0.025:
                 object.posDelta[1] += 0.000555555
                 isTooLow = True
             if isTooLow:
@@ -878,38 +907,35 @@ class HQMServer(DatagramProtocol):
                         if collision:
                             proj, normal = collision
                             temp = 0.125*0.125*0.5*proj*normal
-                            temp2 = getVelocityIncludingRotation(puckObject.pos, puckVertex,
+                            temp -= 0.015625 * getVelocityIncludingRotation(puckObject.pos, puckVertex,
                                                                            puckOrigRotAxis, puckOrigPosDelta)
-                            temp -= 0.015625 * temp2
                             if np.dot (normal, temp) > 0:
                                 pt = projectionThing (temp, normal, 0.05)
                                 puckObject.applySpeedChangeAtPoint(pt, puckVertex)
 
             for puckObject, puckVertices, puckOrigPosDelta, puckOrigRotAxis in puckObjectData:
                for playerObject, stickPlanes, playerOrigStickPosDelta in playerObjectData:
-                   if np.linalg.norm(playerObject.stickPos - puckObject.pos) < 1:   # Close enough to check
-                       for puckVertex in puckVertices:
-                           collision = puckVertexCollidesWithStick(puckObject.pos, puckVertex, stickPlanes)
-                           if collision:
-                               collisionNormal, collisionDot = collision
-                               change = collisionDot * collisionNormal
-                               change -= 0.125*getVelocityIncludingRotation(puckObject.pos, puckVertex, puckOrigRotAxis, puckOrigPosDelta)
-                               change += 0.125*playerOrigStickPosDelta
-                               if np.dot(change, collisionNormal) > 0:
-                                   change2 = projectionThing(change, collisionNormal, 0.5)
-                                   playerObject.stickPosDelta -= 0.25 * change2
-                                   puckObject.applySpeedChangeAtPoint(0.75 * change2, puckVertex)
+                   if getVectorLength(playerObject.stickPos - puckObject.pos) < 1:   # Close enough to check
+                       collisions = puckTest(puckObject.pos, puckVertices, stickPlanes)
+                       for v, dot, normal in collisions:
+                           change = 0.125*0.5*dot*normal
+                           change -= 0.125*getVelocityIncludingRotation(puckObject.pos, v, puckOrigRotAxis, puckOrigPosDelta)
+                           change += 0.125*playerOrigStickPosDelta
+                           if np.dot(change, normal) > 0:
+                               change2 = projectionThing(change, normal, 0.5)
+                               playerObject.stickPosDelta -= 0.25 * change2
+                               puckObject.applySpeedChangeAtPoint(0.75 * change2, v)
 
 
 
         for puckObject in puckObjects:
-            velocity = np.linalg.norm(puckObject.posDelta)
+            velocity = getVectorLength(puckObject.posDelta)
             if velocity > 0.00001:
                 posDeltaDir = puckObject.posDelta / velocity
 
                 puckObject.posDelta -= (0.015625*velocity*velocity)*posDeltaDir
         for puckObject in puckObjects:
-            rotationSpeed = np.linalg.norm(puckObject.rotAxis)
+            rotationSpeed = getVectorLength(puckObject.rotAxis)
             if rotationSpeed > 0.00001:
                 puckObject.rot = rotateMatrixAroundAxis(puckObject.rot, puckObject.rotAxis / rotationSpeed, rotationSpeed)
 
