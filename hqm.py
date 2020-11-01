@@ -295,7 +295,7 @@ class HQMClientSession:
             self.keys = bitmask_set(self.keys, 0x20, True)
         elif  team == 0: #Red team
             self.keys = bitmask_set(self.keys, 0x4, True)            
-        elif  team == -1: #Blue team
+        elif  team == 1: #Blue team
             self.keys = bitmask_set(self.keys, 0x8, True)    
     
     def get_message(self):

@@ -781,8 +781,5 @@ def show_gui():
     w.show()
     sys.exit(app.exec_())    
 
-if __name__ == '__main__':
-    
-    import cProfile
 
-    cProfile.run('show_gui()')
+show_gui()
